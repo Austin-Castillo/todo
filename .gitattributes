@@ -1,0 +1,5 @@
+# Store text files with LF in the repo and check them out with the platform's native line endings.
+* text=auto
+
+# Shell scripts run in Linux containers and CI, so always use LF.
+*.sh text eol=lf
