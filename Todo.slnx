@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Todo.Api/Todo.Api.csproj" />
+    <Project Path="src/Todo.Client/Todo.Client.csproj" />
+    <Project Path="src/Todo.Contracts/Todo.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Todo.IntegrationTests/Todo.IntegrationTests.csproj" />
+    <Project Path="tests/Todo.UnitTests/Todo.UnitTests.csproj" />
+  </Folder>
+</Solution>
