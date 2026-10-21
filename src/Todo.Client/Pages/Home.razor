@@ -1,0 +1,24 @@
+@page "/"
+@inject HttpClient Http
+
+<PageTitle>Todo</PageTitle>
+
+<h1>Todo</h1>
+
+@if (ping is null)
+{
+    <p>Calling the API...</p>
+}
+else
+{
+    <p>API says <strong>@ping.Message</strong> at @ping.ServerTime.ToLocalTime().ToString("T").</p>
+}
+
+@code {
+    private PingResponse? ping;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ping = await Http.GetFromJsonAsync<PingResponse>("api/ping");
+    }
+}
