@@ -3,4 +3,62 @@
 GET {{Todo.Api_HostAddress}}/api/ping
 Accept: application/json
 
+### Lists
+
+GET {{Todo.Api_HostAddress}}/api/lists
+Accept: application/json
+
+###
+
+GET {{Todo.Api_HostAddress}}/api/lists/1
+Accept: application/json
+
+###
+
+POST {{Todo.Api_HostAddress}}/api/lists
+Content-Type: application/json
+
+{ "name": "Groceries" }
+
+###
+
+PUT {{Todo.Api_HostAddress}}/api/lists/1
+Content-Type: application/json
+
+{ "name": "Weekend groceries" }
+
+###
+
+DELETE {{Todo.Api_HostAddress}}/api/lists/1
+
+### Items
+
+POST {{Todo.Api_HostAddress}}/api/lists/1/items
+Content-Type: application/json
+
+{ "content": "Milk" }
+
+###
+
+GET {{Todo.Api_HostAddress}}/api/items/1
+Accept: application/json
+
+###
+
+PUT {{Todo.Api_HostAddress}}/api/items/1
+Content-Type: application/json
+
+{ "content": "Milk", "isComplete": true }
+
+###
+
+DELETE {{Todo.Api_HostAddress}}/api/items/1
+
+### Validation: returns 400 with Problem Details
+
+POST {{Todo.Api_HostAddress}}/api/lists
+Content-Type: application/json
+
+{ "name": "" }
+
 ###
