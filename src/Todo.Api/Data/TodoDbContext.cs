@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Todo.Api.Data.Entities;
+using Todo.Contracts;
 
 namespace Todo.Api.Data;
 
@@ -15,12 +16,12 @@ public class TodoDbContext(DbContextOptions<TodoDbContext> options) : DbContext(
         // Only what conventions can't know is configured here.
         modelBuilder.Entity<TodoList>(list =>
         {
-            list.Property(l => l.Name).HasMaxLength(100);
+            list.Property(l => l.Name).HasMaxLength(TodoLimits.ListNameMaxLength);
         });
 
         modelBuilder.Entity<TodoItem>(item =>
         {
-            item.Property(i => i.Content).HasMaxLength(500);
+            item.Property(i => i.Content).HasMaxLength(TodoLimits.ItemContentMaxLength);
         });
     }
 }
