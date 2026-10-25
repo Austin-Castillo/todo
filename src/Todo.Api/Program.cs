@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Todo.Api.Data;
 using Todo.Api.Endpoints;
-using Todo.Contracts;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -38,7 +37,6 @@ if (app.Environment.IsDevelopment())
 app.MapStaticAssets();
 
 var api = app.MapGroup("/api");
-api.MapGet("/ping", () => new PingResponse("pong", DateTimeOffset.UtcNow));
 api.MapTodoListEndpoints();
 api.MapTodoItemEndpoints();
 

@@ -1,0 +1,213 @@
+@page "/lists/{Id:int}"
+@using System.Net
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+<PageTitle>@(list?.Name ?? "Todo")</PageTitle>
+
+<p><a href="">&larr; All lists</a></p>
+
+@if (notFound)
+{
+    <h1>List not found</h1>
+    <p>It may have been deleted.</p>
+}
+else if (list is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    @if (renaming)
+    {
+        <form @onsubmit="SaveName">
+            <input @bind="nameDraft" @bind:event="oninput" maxlength="@TodoLimits.ListNameMaxLength" aria-label="List name" />
+            <button type="submit" disabled="@(string.IsNullOrWhiteSpace(nameDraft) || saving)">Save</button>
+            <button type="button" @onclick="() => renaming = false">Cancel</button>
+        </form>
+    }
+    else
+    {
+        <div class="heading">
+            <h1>@list.Name</h1>
+            <button @onclick="StartRename">Rename</button>
+            <button @onclick="() => confirmingDelete = true">Delete list</button>
+        </div>
+    }
+
+    @if (confirmingDelete)
+    {
+        <p>
+            Delete "@list.Name" and its @list.Items.Count items?
+            <button @onclick="DeleteList" disabled="@saving">Delete</button>
+            <button @onclick="() => confirmingDelete = false">Cancel</button>
+        </p>
+    }
+
+    <form @onsubmit="AddItem">
+        <input @bind="newItemContent" @bind:event="oninput" maxlength="@TodoLimits.ItemContentMaxLength"
+               placeholder="New item" aria-label="New item" />
+        <button type="submit" disabled="@(string.IsNullOrWhiteSpace(newItemContent) || saving)">Add</button>
+    </form>
+
+    @if (error is not null)
+    {
+        <p class="error">@error</p>
+    }
+
+    @if (list.Items.Count == 0)
+    {
+        <p>No items yet.</p>
+    }
+    else
+    {
+        <ul class="rows">
+            @foreach (var item in list.Items)
+            {
+                <li>
+                    @if (editingId == item.Id)
+                    {
+                        <form @onsubmit="() => SaveContent(item)">
+                            <input @bind="contentDraft" @bind:event="oninput" maxlength="@TodoLimits.ItemContentMaxLength"
+                                   aria-label="Item text" />
+                            <button type="submit" disabled="@(string.IsNullOrWhiteSpace(contentDraft) || saving)">Save</button>
+                            <button type="button" @onclick="() => editingId = null">Cancel</button>
+                        </form>
+                    }
+                    else
+                    {
+                        <label class="@(item.IsComplete ? "done" : null)">
+                            <input type="checkbox" checked="@item.IsComplete" @onchange="() => Toggle(item)" disabled="@saving" />
+                            @item.Content
+                        </label>
+                        <span>
+                            <button @onclick="() => StartEdit(item)">Edit</button>
+                            <button @onclick="() => DeleteItem(item)" disabled="@saving">Delete</button>
+                        </span>
+                    }
+                </li>
+            }
+        </ul>
+    }
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private TodoListDetails? list;
+    private bool notFound;
+    private bool saving;
+    private string? error;
+
+    private string newItemContent = "";
+    private bool renaming;
+    private string nameDraft = "";
+    private bool confirmingDelete;
+    private int? editingId;
+    private string contentDraft = "";
+
+    // Not OnInitializedAsync: going from one list to another reuses this component instance with a new Id.
+    protected override async Task OnParametersSetAsync()
+    {
+        list = null;
+        notFound = false;
+        error = null;
+        renaming = false;
+        confirmingDelete = false;
+        editingId = null;
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            list = await Http.GetFromJsonAsync<TodoListDetails>($"api/lists/{Id}");
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            notFound = true;
+        }
+    }
+
+    // Every write: disable the buttons, send, then reload so the page shows what the server actually stored,
+    // even when the write failed (for example, an item someone else already deleted).
+    private async Task<bool> SaveAsync(Func<Task<HttpResponseMessage>> send)
+    {
+        saving = true;
+        error = null;
+
+        using var response = await send();
+        var succeeded = response.IsSuccessStatusCode;
+        if (!succeeded)
+        {
+            error = "Couldn't save the change.";
+        }
+
+        await LoadAsync();
+        saving = false;
+        return succeeded;
+    }
+
+    private async Task AddItem()
+    {
+        if (await SaveAsync(() => Http.PostAsJsonAsync($"api/lists/{Id}/items", new CreateTodoItemRequest(newItemContent.Trim()))))
+        {
+            newItemContent = "";
+        }
+    }
+
+    // PUT replaces the whole item, so toggling sends the content from the last load too. If it changed elsewhere
+    // since, this overwrites it: the lost update that the Stage 1.1 concurrency token fixes.
+    private Task Toggle(TodoItemDto item) =>
+        SaveAsync(() => Http.PutAsJsonAsync($"api/items/{item.Id}", new UpdateTodoItemRequest(item.Content, !item.IsComplete)));
+
+    private void StartEdit(TodoItemDto item)
+    {
+        editingId = item.Id;
+        contentDraft = item.Content;
+    }
+
+    private async Task SaveContent(TodoItemDto item)
+    {
+        if (await SaveAsync(() => Http.PutAsJsonAsync($"api/items/{item.Id}", new UpdateTodoItemRequest(contentDraft.Trim(), item.IsComplete))))
+        {
+            editingId = null;
+        }
+    }
+
+    private Task DeleteItem(TodoItemDto item) =>
+        SaveAsync(() => Http.DeleteAsync($"api/items/{item.Id}"));
+
+    private void StartRename()
+    {
+        nameDraft = list!.Name;
+        renaming = true;
+    }
+
+    private async Task SaveName()
+    {
+        if (await SaveAsync(() => Http.PutAsJsonAsync($"api/lists/{Id}", new UpdateTodoListRequest(nameDraft.Trim()))))
+        {
+            renaming = false;
+        }
+    }
+
+    private async Task DeleteList()
+    {
+        saving = true;
+
+        using var response = await Http.DeleteAsync($"api/lists/{Id}");
+
+        // A 404 means it was already gone: either way there's no list left to show.
+        if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotFound)
+        {
+            Navigation.NavigateTo("");
+            return;
+        }
+
+        error = "Couldn't delete the list.";
+        saving = false;
+    }
+}
