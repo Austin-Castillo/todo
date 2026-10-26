@@ -2,99 +2,100 @@
 @inject ITodoService Todos
 @inject NavigationManager Navigation
 
-<PageTitle>@(list?.Name ?? "Todo")</PageTitle>
+<PageTitle>@(CurrentList?.Name ?? "Todo")</PageTitle>
 
 <p><a href="">&larr; All lists</a></p>
 
-@if (notFound)
-{
-    <h1>List not found</h1>
-    <p>It may have been deleted.</p>
-}
-else if (list is null)
+@if (CurrentList is null)
 {
     <p>Loading...</p>
 }
 else
 {
-    @if (renaming)
-    {
-        <form @onsubmit="SaveName">
-            <input @bind="nameDraft" @bind:event="oninput" maxlength="@TodoLimits.ListNameMaxLength" aria-label="List name" />
-            <button type="submit" disabled="@(string.IsNullOrWhiteSpace(nameDraft) || saving)">Save</button>
-            <button type="button" @onclick="() => renaming = false">Cancel</button>
+    @* Prerendered HTML is visible before the browser app has started; until then clicks and typing would be lost. *@
+    <fieldset disabled="@(!RendererInfo.IsInteractive)">
+        @if (renaming)
+        {
+            <form @onsubmit="SaveName">
+                <input @bind="nameDraft" @bind:event="oninput" maxlength="@TodoLimits.ListNameMaxLength" aria-label="List name" />
+                <button type="submit" disabled="@(string.IsNullOrWhiteSpace(nameDraft) || saving)">Save</button>
+                <button type="button" @onclick="() => renaming = false">Cancel</button>
+            </form>
+        }
+        else
+        {
+            <div class="heading">
+                <h1>@CurrentList.Name</h1>
+                <button @onclick="StartRename">Rename</button>
+                <button @onclick="() => confirmingDelete = true">Delete list</button>
+            </div>
+        }
+
+        @if (confirmingDelete)
+        {
+            <p>
+                Delete "@CurrentList.Name" and its @CurrentList.Items.Count items?
+                <button @onclick="DeleteList" disabled="@saving">Delete</button>
+                <button @onclick="() => confirmingDelete = false">Cancel</button>
+            </p>
+        }
+
+        <form @onsubmit="AddItem">
+            <input @bind="newItemContent" @bind:event="oninput" maxlength="@TodoLimits.ItemContentMaxLength"
+                   placeholder="New item" aria-label="New item" />
+            <button type="submit" disabled="@(string.IsNullOrWhiteSpace(newItemContent) || saving)">Add</button>
         </form>
-    }
-    else
-    {
-        <div class="heading">
-            <h1>@list.Name</h1>
-            <button @onclick="StartRename">Rename</button>
-            <button @onclick="() => confirmingDelete = true">Delete list</button>
-        </div>
-    }
 
-    @if (confirmingDelete)
-    {
-        <p>
-            Delete "@list.Name" and its @list.Items.Count items?
-            <button @onclick="DeleteList" disabled="@saving">Delete</button>
-            <button @onclick="() => confirmingDelete = false">Cancel</button>
-        </p>
-    }
+        @if (error is not null)
+        {
+            <p class="error">@error</p>
+        }
 
-    <form @onsubmit="AddItem">
-        <input @bind="newItemContent" @bind:event="oninput" maxlength="@TodoLimits.ItemContentMaxLength"
-               placeholder="New item" aria-label="New item" />
-        <button type="submit" disabled="@(string.IsNullOrWhiteSpace(newItemContent) || saving)">Add</button>
-    </form>
-
-    @if (error is not null)
-    {
-        <p class="error">@error</p>
-    }
-
-    @if (list.Items.Count == 0)
-    {
-        <p>No items yet.</p>
-    }
-    else
-    {
-        <ul class="rows">
-            @foreach (var item in list.Items)
-            {
-                <li>
-                    @if (editingId == item.Id)
-                    {
-                        <form @onsubmit="() => SaveContent(item)">
-                            <input @bind="contentDraft" @bind:event="oninput" maxlength="@TodoLimits.ItemContentMaxLength"
-                                   aria-label="Item text" />
-                            <button type="submit" disabled="@(string.IsNullOrWhiteSpace(contentDraft) || saving)">Save</button>
-                            <button type="button" @onclick="() => editingId = null">Cancel</button>
-                        </form>
-                    }
-                    else
-                    {
-                        <label class="@(item.IsComplete ? "done" : null)">
-                            <input type="checkbox" checked="@item.IsComplete" @onchange="() => Toggle(item)" disabled="@saving" />
-                            @item.Content
-                        </label>
-                        <span>
-                            <button @onclick="() => StartEdit(item)">Edit</button>
-                            <button @onclick="() => DeleteItem(item)" disabled="@saving">Delete</button>
-                        </span>
-                    }
-                </li>
-            }
-        </ul>
-    }
+        @if (CurrentList.Items.Count == 0)
+        {
+            <p>No items yet.</p>
+        }
+        else
+        {
+            <ul class="rows">
+                @foreach (var item in CurrentList.Items)
+                {
+                    <li>
+                        @if (editingId == item.Id)
+                        {
+                            <form @onsubmit="() => SaveContent(item)">
+                                <input @bind="contentDraft" @bind:event="oninput" maxlength="@TodoLimits.ItemContentMaxLength"
+                                       aria-label="Item text" />
+                                <button type="submit" disabled="@(string.IsNullOrWhiteSpace(contentDraft) || saving)">Save</button>
+                                <button type="button" @onclick="() => editingId = null">Cancel</button>
+                            </form>
+                        }
+                        else
+                        {
+                            <label class="@(item.IsComplete ? "done" : null)">
+                                <input type="checkbox" checked="@item.IsComplete" @onchange="() => Toggle(item)" disabled="@saving" />
+                                @item.Content
+                            </label>
+                            <span>
+                                <button @onclick="() => StartEdit(item)">Edit</button>
+                                <button @onclick="() => DeleteItem(item)" disabled="@saving">Delete</button>
+                            </span>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    </fieldset>
 }
 
 @code {
     [Parameter] public int Id { get; set; }
 
-    private TodoListDetails? list;
-    private bool notFound;
+    // Loaded on the server while prerendering, then written into the page, so the browser app starts with it
+    // instead of loading it again. Must be a public property.
+    [PersistentState]
+    public TodoListDetails? CurrentList { get; set; }
+
     private bool saving;
     private string? error;
 
@@ -108,8 +109,13 @@ else
     // Not OnInitializedAsync: going from one list to another reuses this component instance with a new Id.
     protected override async Task OnParametersSetAsync()
     {
-        list = null;
-        notFound = false;
+        // Already showing this list: restored from prerendering, or the same list rendering again.
+        if (CurrentList?.Id == Id)
+        {
+            return;
+        }
+
+        CurrentList = null;
         error = null;
         renaming = false;
         confirmingDelete = false;
@@ -120,8 +126,12 @@ else
 
     private async Task LoadAsync()
     {
-        list = await Todos.GetListAsync(Id);
-        notFound = list is null;
+        CurrentList = await Todos.GetListAsync(Id);
+        if (CurrentList is null)
+        {
+            // Shows the router's NotFoundPage instead: a real 404 response when the server renders it.
+            Navigation.NotFound();
+        }
     }
 
     // Every write: disable the buttons, send, then reload so the page shows what the server actually stored,
@@ -174,7 +184,7 @@ else
 
     private void StartRename()
     {
-        nameDraft = list!.Name;
+        nameDraft = CurrentList!.Name;
         renaming = true;
     }
 

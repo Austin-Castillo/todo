@@ -6,29 +6,32 @@
 
 <h1>Todo lists</h1>
 
-<form @onsubmit="CreateList">
-    <input @bind="newListName" @bind:event="oninput" maxlength="@TodoLimits.ListNameMaxLength"
-           placeholder="New list" aria-label="New list name" />
-    <button type="submit" disabled="@(string.IsNullOrWhiteSpace(newListName) || saving)">Add</button>
-</form>
+@* Prerendered HTML is visible before the browser app has started; until then clicks and typing would be lost. *@
+<fieldset disabled="@(!RendererInfo.IsInteractive)">
+    <form @onsubmit="CreateList">
+        <input @bind="newListName" @bind:event="oninput" maxlength="@TodoLimits.ListNameMaxLength"
+               placeholder="New list" aria-label="New list name" />
+        <button type="submit" disabled="@(string.IsNullOrWhiteSpace(newListName) || saving)">Add</button>
+    </form>
+</fieldset>
 
 @if (error is not null)
 {
     <p class="error">@error</p>
 }
 
-@if (lists is null)
+@if (Lists is null)
 {
     <p>Loading...</p>
 }
-else if (lists.Count == 0)
+else if (Lists.Count == 0)
 {
     <p>No lists yet.</p>
 }
 else
 {
     <ul class="rows">
-        @foreach (var list in lists)
+        @foreach (var list in Lists)
         {
             <li>
                 <a href="lists/@list.Id">@list.Name</a>
@@ -39,14 +42,18 @@ else
 }
 
 @code {
-    private List<TodoListSummary>? lists;
+    // Loaded on the server while prerendering, then written into the page, so the browser app starts with it
+    // instead of loading it again. Must be a public property.
+    [PersistentState]
+    public List<TodoListSummary>? Lists { get; set; }
+
     private string newListName = "";
     private bool saving;
     private string? error;
 
     protected override async Task OnInitializedAsync()
     {
-        lists = await Todos.GetListsAsync();
+        Lists ??= await Todos.GetListsAsync();
     }
 
     private async Task CreateList()

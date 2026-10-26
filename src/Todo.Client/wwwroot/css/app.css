@@ -5,6 +5,14 @@ body {
     padding: 0 1rem;
 }
 
+/* Used only to disable the controls until the app is interactive, so it shouldn't look like anything. */
+fieldset {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+}
+
 form, .heading {
     display: flex;
     align-items: center;
