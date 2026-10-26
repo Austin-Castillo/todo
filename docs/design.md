@@ -12,15 +12,15 @@ _What can a user do? What is deliberately out of scope, and why?_
 ## Parts
 
 _What are the pieces (API, client, database), and how do they talk to each other? What does the data model look like?_
-- The browser client talks to the ASP.NET Core API. The API handles CRUD operations via EF Core, which in turn talks to the database.
+- The browser client talks to the ASP.NET Core API. The API handles CRUD operations via EF Core, which in turn talks to the database. When the server prerenders a page, it reads the data through the same EF Core service directly, without going through the API.
 - Data will be stored locally in SQL Server during development, then in Azure SQL in production.
 - The core data model is comprised of TodoList and TodoItem, where one TodoList can hold n-number of TodoItems.
 - A TodoItem will have: Id, TodoListId (foreign key), content and a complete flag
 - A TodoList will have: Id, name and a list of TodoItems; it will not have a complete flag, but will be able to compute its completeness by comparing number of TodoItems to number of completed TodoItems; when a TodoList is deleted, the delete will cascade to all child TodoItems.
 
 _Open question to take a position on: what kind of Blazor client? Blazor WebAssembly (static files in the browser calling the API) or a Blazor Web App with server interactivity (a server process calling the API)? How does that choice change what you deploy: one container or two?_
-- The app will use Blazor WebAssembly as its hosting model (see ADR-2).
-- The container will run the API and serve the client's static files, so only one container will be required to ship the application. SQL Server runs as a second container during development, then it is a managed service (Azure SQL) for production.
+- The app is a Blazor Web App with global WebAssembly interactivity: the server prerenders each page, then it runs in the browser as WebAssembly (see ADR-0003, which superseded the original standalone WebAssembly choice in ADR-0002).
+- The container will run the API, render the page shell and serve the client's static files, so only one container will be required to ship the application. SQL Server runs as a second container during development, then it is a managed service (Azure SQL) for production.
 
 ## How it ships
 
