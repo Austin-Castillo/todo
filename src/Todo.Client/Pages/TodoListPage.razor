@@ -1,6 +1,5 @@
 @page "/lists/{Id:int}"
-@using System.Net
-@inject HttpClient Http
+@inject ITodoService Todos
 @inject NavigationManager Navigation
 
 <PageTitle>@(list?.Name ?? "Todo")</PageTitle>
@@ -121,25 +120,18 @@ else
 
     private async Task LoadAsync()
     {
-        try
-        {
-            list = await Http.GetFromJsonAsync<TodoListDetails>($"api/lists/{Id}");
-        }
-        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
-        {
-            notFound = true;
-        }
+        list = await Todos.GetListAsync(Id);
+        notFound = list is null;
     }
 
     // Every write: disable the buttons, send, then reload so the page shows what the server actually stored,
     // even when the write failed (for example, an item someone else already deleted).
-    private async Task<bool> SaveAsync(Func<Task<HttpResponseMessage>> send)
+    private async Task<bool> SaveAsync(Func<Task<bool>> save)
     {
         saving = true;
         error = null;
 
-        using var response = await send();
-        var succeeded = response.IsSuccessStatusCode;
+        var succeeded = await save();
         if (!succeeded)
         {
             error = "Couldn't save the change.";
@@ -152,16 +144,16 @@ else
 
     private async Task AddItem()
     {
-        if (await SaveAsync(() => Http.PostAsJsonAsync($"api/lists/{Id}/items", new CreateTodoItemRequest(newItemContent.Trim()))))
+        if (await SaveAsync(async () => await Todos.CreateItemAsync(Id, new CreateTodoItemRequest(newItemContent.Trim())) is not null))
         {
             newItemContent = "";
         }
     }
 
-    // PUT replaces the whole item, so toggling sends the content from the last load too. If it changed elsewhere
+    // An update replaces the whole item, so toggling sends the content from the last load too. If it changed elsewhere
     // since, this overwrites it: the lost update that the Stage 1.1 concurrency token fixes.
     private Task Toggle(TodoItemDto item) =>
-        SaveAsync(() => Http.PutAsJsonAsync($"api/items/{item.Id}", new UpdateTodoItemRequest(item.Content, !item.IsComplete)));
+        SaveAsync(() => Todos.UpdateItemAsync(item.Id, new UpdateTodoItemRequest(item.Content, !item.IsComplete)));
 
     private void StartEdit(TodoItemDto item)
     {
@@ -171,14 +163,14 @@ else
 
     private async Task SaveContent(TodoItemDto item)
     {
-        if (await SaveAsync(() => Http.PutAsJsonAsync($"api/items/{item.Id}", new UpdateTodoItemRequest(contentDraft.Trim(), item.IsComplete))))
+        if (await SaveAsync(() => Todos.UpdateItemAsync(item.Id, new UpdateTodoItemRequest(contentDraft.Trim(), item.IsComplete))))
         {
             editingId = null;
         }
     }
 
     private Task DeleteItem(TodoItemDto item) =>
-        SaveAsync(() => Http.DeleteAsync($"api/items/{item.Id}"));
+        SaveAsync(() => Todos.DeleteItemAsync(item.Id));
 
     private void StartRename()
     {
@@ -188,7 +180,7 @@ else
 
     private async Task SaveName()
     {
-        if (await SaveAsync(() => Http.PutAsJsonAsync($"api/lists/{Id}", new UpdateTodoListRequest(nameDraft.Trim()))))
+        if (await SaveAsync(() => Todos.UpdateListAsync(Id, new UpdateTodoListRequest(nameDraft.Trim()))))
         {
             renaming = false;
         }
@@ -198,10 +190,9 @@ else
     {
         saving = true;
 
-        using var response = await Http.DeleteAsync($"api/lists/{Id}");
-
-        // A 404 means it was already gone: either way there's no list left to show.
-        if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotFound)
+        // If the delete didn't succeed, check whether the list is gone anyway (deleted elsewhere):
+        // either way there's no list left to show.
+        if (await Todos.DeleteListAsync(Id) || await Todos.GetListAsync(Id) is null)
         {
             Navigation.NavigateTo("");
             return;

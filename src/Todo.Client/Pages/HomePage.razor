@@ -1,5 +1,5 @@
 @page "/"
-@inject HttpClient Http
+@inject ITodoService Todos
 @inject NavigationManager Navigation
 
 <PageTitle>Todo</PageTitle>
@@ -46,7 +46,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        lists = await Http.GetFromJsonAsync<List<TodoListSummary>>("api/lists");
+        lists = await Todos.GetListsAsync();
     }
 
     private async Task CreateList()
@@ -55,8 +55,8 @@ else
         saving = true;
         error = null;
 
-        var response = await Http.PostAsJsonAsync("api/lists", new CreateTodoListRequest(newListName.Trim()));
-        if (!response.IsSuccessStatusCode)
+        var created = await Todos.CreateListAsync(new CreateTodoListRequest(newListName.Trim()));
+        if (created is null)
         {
             error = "Couldn't save the list.";
             saving = false;
@@ -64,7 +64,6 @@ else
         }
 
         // A new list has no items yet, so go straight to it to add some.
-        var created = await response.Content.ReadFromJsonAsync<TodoListDetails>();
-        Navigation.NavigateTo($"lists/{created!.Id}");
+        Navigation.NavigateTo($"lists/{created.Id}");
     }
 }

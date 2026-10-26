@@ -2,6 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Todo.Api.Components;
 using Todo.Api.Data;
 using Todo.Api.Endpoints;
+using Todo.Api.Services;
+using Todo.Contracts;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,6 +28,9 @@ builder.Services.AddDbContext<TodoDbContext>(options =>
         options.EnableSensitiveDataLogging();
     }
 });
+
+// Used by the API endpoints, and by server-side rendering of the pages. The Client registers its own HTTP version.
+builder.Services.AddScoped<ITodoService, ServerTodoService>();
 
 var app = builder.Build();
 
