@@ -10,14 +10,24 @@
     <ResourcePreloader />
     <link rel="stylesheet" href="@Assets["css/app.css"]" />
     <ImportMap />
-    <HeadOutlet @rendermode="InteractiveWebAssembly" />
+    <HeadOutlet @rendermode="PageRenderMode" />
 </head>
 
 <body>
     @* The whole app runs in the browser as WebAssembly. Each full page load is prerendered here first (the default),
        so the page arrives with its data and the browser app takes over once it has started. *@
-    <Routes @rendermode="InteractiveWebAssembly" />
+    <Routes @rendermode="PageRenderMode" />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
 </body>
 
 </html>
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    // Pages marked [ExcludeFromInteractiveRouting] (the Error page) render as plain server HTML: they live in this
+    // project, which the browser doesn't download, and they need the HttpContext. Everything else runs as WebAssembly.
+    private IComponentRenderMode? PageRenderMode =>
+        HttpContext.AcceptsInteractiveRouting() ? InteractiveWebAssembly : null;
+}

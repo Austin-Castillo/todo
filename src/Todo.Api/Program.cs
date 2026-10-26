@@ -32,6 +32,9 @@ builder.Services.AddDbContext<TodoDbContext>(options =>
 // Used by the API endpoints, and by server-side rendering of the pages. The Client registers its own HTTP version.
 builder.Services.AddScoped<ITodoService, ServerTodoService>();
 
+// Error responses from the API use the Problem Details format (RFC 9457), like the validation 400s already do.
+builder.Services.AddProblemDetails();
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -39,6 +42,29 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
     app.UseWebAssemblyDebugging();
 }
+else
+{
+    // Unhandled exceptions outside Development (which shows the detailed developer exception page instead)
+    // re-run the request as the Error page. The /api branch below handles API exceptions first.
+    app.UseExceptionHandler("/error", createScopeForErrors: true);
+}
+
+// Error statuses with no body, such as a 404 for an unknown URL, re-run the request as the NotFound page, keeping
+// the status code. The /api branch below answers API errors first, so these see a finished response and skip it.
+app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+
+// API errors are Problem Details JSON. This branch sits inside the page handlers above, so it handles API errors
+// before they get there. (The page handlers stay outside any branch: re-running the request from inside a UseWhen
+// branch found no endpoint, so the Error and NotFound pages never rendered.)
+app.UseWhen(IsApiRequest, api =>
+{
+    if (!app.Environment.IsDevelopment())
+    {
+        api.UseExceptionHandler();
+    }
+
+    api.UseStatusCodePages();
+});
 
 // No UseHttpsRedirection: in production, HTTPS is handled by the hosting platform's ingress in front of the container.
 
@@ -59,3 +85,6 @@ app.MapRazorComponents<App>()
     .AddAdditionalAssemblies(typeof(Todo.Client._Imports).Assembly);
 
 app.Run();
+
+// The API's errors are for programs (JSON); everything else is for people (pages).
+static bool IsApiRequest(HttpContext context) => context.Request.Path.StartsWithSegments("/api");

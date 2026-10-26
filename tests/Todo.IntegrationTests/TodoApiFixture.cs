@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +25,11 @@ public sealed class TodoApiFixture : IAsyncLifetime
         _factory ?? throw new InvalidOperationException("The fixture hasn't been initialized.");
 
     public HttpClient CreateClient() => Factory.CreateClient();
+
+    // A client for a variant of the app, such as another environment or a replaced service, on the same database.
+    // Starts its own in-memory server; the fixture's factory disposes it along with itself.
+    public HttpClient CreateClient(Action<IWebHostBuilder> configure) =>
+        Factory.WithWebHostBuilder(configure).CreateClient();
 
     public async ValueTask InitializeAsync()
     {
