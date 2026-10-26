@@ -1,8 +1,13 @@
 using Microsoft.EntityFrameworkCore;
+using Todo.Api.Components;
 using Todo.Api.Data;
 using Todo.Api.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Blazor Web App: the server renders the page shell (Components/App.razor); the pages run in the browser as WebAssembly.
+builder.Services.AddRazorComponents()
+    .AddInteractiveWebAssemblyComponents();
 
 builder.Services.AddOpenApi();
 
@@ -32,17 +37,20 @@ if (app.Environment.IsDevelopment())
 
 // No UseHttpsRedirection: in production, HTTPS is handled by the hosting platform's ingress in front of the container.
 
-// Serve the Blazor WebAssembly client (Todo.Client) from this app, so client and API share one origin.
-// MapStaticAssets also serves the client's _framework files (fingerprinted and compressed).
+// Required by MapRazorComponents: server-rendered forms are checked for an antiforgery token.
+app.UseAntiforgery();
+
+// Static files, including the client's _framework files (fingerprinted and compressed). Client and API share one origin.
 app.MapStaticAssets();
 
 var api = app.MapGroup("/api");
 api.MapTodoListEndpoints();
 api.MapTodoItemEndpoints();
 
-// Unknown /api paths return 404; every other unknown path gets the client's index.html,
-// so client-side routes like /lists/3 survive a refresh or a deep link.
-app.MapFallback("/api/{**path}", () => Results.NotFound());
-app.MapFallbackToFile("index.html");
+// The client's @page routes are registered here too, so a deep link like /lists/3 renders the app without a fallback.
+// Unknown paths, /api ones included, match nothing and return 404.
+app.MapRazorComponents<App>()
+    .AddInteractiveWebAssemblyRenderMode()
+    .AddAdditionalAssemblies(typeof(Todo.Client._Imports).Assembly);
 
 app.Run();

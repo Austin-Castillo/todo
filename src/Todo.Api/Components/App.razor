@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    @* Rendered by the server on each full page load, so @Assets, ResourcePreloader and ImportMap write the current
+       fingerprinted file names straight from the static assets manifest. *@
+    <ResourcePreloader />
+    <link rel="stylesheet" href="@Assets["css/app.css"]" />
+    <ImportMap />
+    <HeadOutlet @rendermode="renderMode" />
+</head>
+
+<body>
+    <Routes @rendermode="renderMode" />
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+</body>
+
+</html>
+
+@code {
+    // The whole app runs in the browser. Prerendering stays off until the pages can load their data on the server too.
+    private static readonly IComponentRenderMode renderMode = new InteractiveWebAssemblyRenderMode(prerender: false);
+}
