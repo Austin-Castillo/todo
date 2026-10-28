@@ -1,0 +1,55 @@
+# The whole app on one machine, running the same images as production, with its own SQL Server.
+#   First time: copy .env.example to .env and set the password.
+#   Start or update:  docker compose up -d --build      Stop:  docker compose down      Also wipe the database:  down -v
+# Startup order: sql becomes healthy -> migrate applies pending migrations and exits -> api starts (ADR-0004).
+
+name: todo
+
+# Shared by migrate and api. The password comes from .env; Compose stops with this message if it's missing or empty.
+# SA is fine for a local throwaway database. TrustServerCertificate: SQL Server's certificate here is self-signed.
+x-todo-connection: &todo-connection "Server=sql,1433;Database=Todo;User Id=sa;Password=${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env (see .env.example)};TrustServerCertificate=True"
+
+services:
+  sql:
+    image: mcr.microsoft.com/mssql/server:2025-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env (see .env.example)}
+    # Only for looking at this database from your machine (VS Code's MSSQL extension); migrate and api reach it
+    # as sql:1433 on the project network. 14334, because the separate todo-sql container uses 14333.
+    ports:
+      - "14334:1433"
+    volumes:
+      - sql-data:/var/opt/mssql
+    # Healthy once SQL Server accepts a login, which takes 10-20 seconds after the container starts.
+    # $$ leaves the $ for the container's shell, so the password is read from the container's environment.
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -b -Q 'SELECT 1' > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  migrate:
+    build:
+      context: .
+      target: migrations
+    image: todo-migrations
+    command: ["--connection", *todo-connection]
+    depends_on:
+      sql:
+        condition: service_healthy
+
+  api:
+    build: .
+    image: todo-api
+    ports:
+      - "8080:8080"
+    environment:
+      ConnectionStrings__Todo: *todo-connection
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  sql-data:

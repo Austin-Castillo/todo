@@ -4,6 +4,7 @@
 !global.json
 !Directory.Build.props
 !Directory.Packages.props
+!dotnet-tools.json
 !src/
 
 # Build output from the host: Windows paths in obj/ break a Linux restore.
