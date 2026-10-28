@@ -1,0 +1,83 @@
+# Builds and tests every pull request, and main after each merge. Two jobs, run in parallel on fresh runners.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# The automatic GITHUB_TOKEN can only read the repo: nothing here needs to write.
+permissions:
+  contents: read
+
+# A newer push to the same branch or PR cancels the run still in progress for it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    # The default is 6 hours; a hung run would use up the month's minutes.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Don't leave the token in the clone's Git config for later steps.
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      # Warnings are errors (Directory.Build.props), so this also fails on vulnerable NuGet packages.
+      - run: dotnet build -c Release
+
+      # The integration tests start SQL Server with Testcontainers, using the runner's Docker.
+      - run: dotnet test -c Release --no-build
+
+      # Fails when an entity changed without a migration to match (ADR-0004).
+      - name: Check for model changes without a migration
+        run: |
+          dotnet tool restore
+          dotnet ef migrations has-pending-model-changes --project src/Todo.Api --configuration Release --no-build
+
+  image:
+    name: Image smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # For the throwaway SQL Server that lives and dies on this runner, so not a secret.
+      MSSQL_SA_PASSWORD: Ci-${{ github.run_id }}-Pw1!
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # The same stack as `docker compose up` locally: both images built, SQL Server healthy,
+      # migrations applied by the bundle, then the server started.
+      - name: Start the app with Docker Compose
+        run: docker compose up -d --build --wait api
+
+      # The server is running but may still be starting up, so the first request retries.
+      - name: Smoke test
+        run: |
+          check() {
+            local path=$1 expected=$2 status
+            status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              --retry 10 --retry-delay 2 --retry-all-errors "http://localhost:8080$path")
+            echo "$path -> $status (expected $expected)"
+            [ "$status" = "$expected" ]
+          }
+          # A prerendered page queries the database, so this also proves the migrations ran.
+          check / 200
+          # Missing from the published app before RequiresAspNetWebAssets was set.
+          check /_framework/blazor.web.js 200
+          check /api/lists 200
+          check /no-such-page 404
+
+      - name: Show container logs
+        if: failure()
+        run: docker compose logs
