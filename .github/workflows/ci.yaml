@@ -35,14 +35,15 @@ jobs:
       # Warnings are errors (Directory.Build.props), so this also fails on vulnerable NuGet packages.
       - run: dotnet build -c Release
 
-      # The integration tests start SQL Server with Testcontainers, using the runner's Docker.
-      - run: dotnet test -c Release --no-build
-
-      # Fails when an entity changed without a migration to match (ADR-0004).
+      # Fails when an entity changed without a migration to match (ADR-0004). Before the tests: it takes seconds and
+      # names the problem, while the tests would all fail on it with the same error (Migrate refuses pending changes).
       - name: Check for model changes without a migration
         run: |
           dotnet tool restore
           dotnet ef migrations has-pending-model-changes --project src/Todo.Api --configuration Release --no-build
+
+      # The integration tests start SQL Server with Testcontainers, using the runner's Docker.
+      - run: dotnet test -c Release --no-build
 
   image:
     name: Image smoke test
