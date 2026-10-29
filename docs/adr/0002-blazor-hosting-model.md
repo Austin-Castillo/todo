@@ -1,6 +1,6 @@
 # ADR-0002: Blazor WebAssembly Served by the API
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0003](0003-blazor-web-app-webassembly-interactivity.md)
 - **Date:** 2026-10-20
 
 ## Context

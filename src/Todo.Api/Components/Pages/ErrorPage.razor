@@ -1,0 +1,24 @@
+@page "/error"
+@using System.Diagnostics
+@attribute [ExcludeFromInteractiveRouting]
+
+@* Where unhandled exceptions in pages end up outside Development (UseExceptionHandler in Program.cs).
+   Server-only: it shows nothing about the exception itself, which could leak internals. *@
+
+<PageTitle>Error</PageTitle>
+
+<h1>Something went wrong</h1>
+<p>An error occurred while processing your request.</p>
+
+@if (RequestId is not null)
+{
+    <p class="muted">Request ID: <code>@RequestId</code></p>
+}
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    // The same id as the request's trace in the server logs, so a reported error can be found there.
+    private string? RequestId => Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

@@ -2,6 +2,8 @@
 
   <PropertyGroup>
     <UserSecretsId>1d4410d0-ca0d-4e5a-a9c6-6f3f2cc8a306</UserSecretsId>
+    <!-- NavigateTo during server-side rendering redirects without throwing a NavigationException (new .NET 10 behavior). -->
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
   </PropertyGroup>
 
   <ItemGroup>

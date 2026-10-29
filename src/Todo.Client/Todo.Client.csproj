@@ -1,7 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
 
+  <!-- Settings from the .NET 10 Blazor Web App template: this project is the WebAssembly half of an app the server hosts. -->
   <PropertyGroup>
-    <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
+    <!-- The server's build and publish own these static files, as for a library, instead of treating this as a standalone app. -->
+    <StaticWebAssetProjectMode>Default</StaticWebAssetProjectMode>
+    <!-- Never run on its own, so no launch profile. -->
+    <NoDefaultLaunchSettingsFile>true</NoDefaultLaunchSettingsFile>
+    <!-- NavigateTo during server-side rendering redirects without throwing a NavigationException (new .NET 10 behavior). -->
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
   </PropertyGroup>
 
   <ItemGroup>
