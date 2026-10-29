@@ -16,6 +16,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- The fixture reads the SQL Server image from compose.yaml, so tests use the same one. -->
+  <ItemGroup>
+    <None Include="..\..\compose.yaml" Link="compose.yaml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\Todo.Api\Todo.Api.csproj" />
     <ProjectReference Include="..\..\src\Todo.Contracts\Todo.Contracts.csproj" />

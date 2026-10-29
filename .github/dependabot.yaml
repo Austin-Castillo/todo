@@ -1,0 +1,47 @@
+# Dependabot version updates: one pull request a month with every ecosystem's updates, which CI tests like any
+# other. Security updates (alerts with a fix) are turned on in the repo's settings, not here, and don't wait for
+# this schedule.
+
+version: 2
+
+multi-ecosystem-groups:
+  monthly:
+    schedule:
+      # The 20th, not `monthly` (the 1st): .NET patches ship on Patch Tuesday (the 8th-14th), so this picks them up
+      # about a week later, after Dependabot's 3-day cooldown.
+      interval: cron
+      cronjob: "0 9 20 * *"
+
+updates:
+  # Directory.Packages.props (Central Package Management) and .config/dotnet-tools.json (Dependabot doesn't look
+  # for a tool manifest at the repo root).
+  - package-ecosystem: nuget
+    directory: /
+    multi-ecosystem-group: monthly
+    patterns: ["*"]
+    # Stay on .NET 10 (LTS): moving to a new major version is a deliberate upgrade, not a bot PR.
+    ignore:
+      - dependency-name: "Microsoft.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "System.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: dotnet-ef
+        update-types: ["version-update:semver-major"]
+
+  # The FROM lines in the Dockerfile.
+  - package-ecosystem: docker
+    directory: /
+    multi-ecosystem-group: monthly
+    patterns: ["*"]
+    ignore:
+      - dependency-name: "dotnet/*"
+        update-types: ["version-update:semver-major"]
+
+  # No docker-compose entry: compose.yaml's only image is SQL Server, whose CU tags Dependabot can't compare
+  # (it reads "-CU10-ubuntu-24.04" as a suffix and only considers tags with the same one). It's updated by hand.
+
+  # The actions in .github/workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    multi-ecosystem-group: monthly
+    patterns: ["*"]

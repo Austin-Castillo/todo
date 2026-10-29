@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.SqlClient;
@@ -16,8 +17,9 @@ namespace Todo.IntegrationTests;
 // Tests share the database and run in parallel, so each test creates its own data and asserts only about that.
 public sealed class TodoApiFixture : IAsyncLifetime
 {
-    // Same image as local development (the todo-sql container), so tests run on the engine the app uses.
-    private readonly MsSqlContainer _sql = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2025-latest").Build();
+    // The same SQL Server image as compose.yaml, read from it so there's one place to change it (and Dependabot
+    // keeps that one current; it doesn't edit C#).
+    private readonly MsSqlContainer _sql = new MsSqlBuilder(SqlServerImageFromCompose()).Build();
 
     private WebApplicationFactory<Program>? _factory;
 
@@ -49,6 +51,16 @@ public sealed class TodoApiFixture : IAsyncLifetime
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<TodoDbContext>();
         await db.Database.MigrateAsync(TestContext.Current.CancellationToken);
+    }
+
+    // compose.yaml is copied next to the test assembly (see the .csproj), so this works from any working directory.
+    private static string SqlServerImageFromCompose()
+    {
+        var compose = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "compose.yaml"));
+        var match = Regex.Match(compose, @"^\s*image:\s*(mcr\.microsoft\.com/mssql/server:\S+)\s*$", RegexOptions.Multiline);
+        return match.Success
+            ? match.Groups[1].Value
+            : throw new InvalidOperationException("No mcr.microsoft.com/mssql/server image found in compose.yaml.");
     }
 
     public async ValueTask DisposeAsync()

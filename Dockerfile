@@ -10,11 +10,12 @@ WORKDIR /src
 # Restore from only the files restore reads, so this layer (and the NuGet download) is reused
 # until a project file or a package version changes. Restore must not depend on the source: anything the SDK
 # decides from source files (such as RequiresAspNetWebAssets, set in Todo.Api.csproj) has to be set explicitly.
-COPY global.json Directory.Build.props Directory.Packages.props dotnet-tools.json ./
+COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY src/Todo.Api/Todo.Api.csproj src/Todo.Api/
 COPY src/Todo.Client/Todo.Client.csproj src/Todo.Client/
 COPY src/Todo.Contracts/Todo.Contracts.csproj src/Todo.Contracts/
 # dotnet-ef, for building the migration bundle.
+COPY .config/dotnet-tools.json .config/
 RUN dotnet tool restore
 # The RuntimeIdentifier property, not restore's -r: -r makes every project in the graph restore for linux-x64,
 # including the Blazor Client, which only runs as browser-wasm, and that fails (NU1102, no Mono linux-x64 runtime pack).
@@ -36,7 +37,7 @@ RUN dotnet ef migrations bundle --project src/Todo.Api --configuration Release -
 
 # The bundle loads Todo.Api.dll to configure its DbContext, so it needs the ASP.NET Core runtime too.
 # Same base as the server's image, so the two share its layers.
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra AS migrations
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.13-noble-chiseled-extra AS migrations
 WORKDIR /app
 COPY --from=bundle /app/efbundle .
 # Likewise when the bundle runs (ENV doesn't carry over from the bundle stage: this is a new image).
@@ -47,7 +48,7 @@ ENTRYPOINT ["./efbundle"]
 # Final stage, the default target: the server. The ASP.NET Core runtime only. Chiseled means no shell or package
 # manager, and it runs as the non-root "app" user. -extra adds ICU and time zone data, so culture and time zone
 # behavior match a full OS.
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.13-noble-chiseled-extra
 WORKDIR /app
 COPY --from=publish /app/publish .
 
