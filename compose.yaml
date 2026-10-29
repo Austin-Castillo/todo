@@ -11,7 +11,10 @@ x-todo-connection: &todo-connection "Server=sql,1433;Database=Todo;User Id=sa;Pa
 
 services:
   sql:
-    image: mcr.microsoft.com/mssql/server:2025-latest
+    # Pinned to a release, so local, tests and CI run the same engine; the integration tests read this line
+    # (TodoApiFixture). Updated by hand: Dependabot can't compare CU tags. It's only a stand-in for Azure SQL,
+    # which Microsoft keeps current, so falling a CU or two behind is harmless.
+    image: mcr.microsoft.com/mssql/server:2025-CU10-ubuntu-24.04
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env (see .env.example)}
