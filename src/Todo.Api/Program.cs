@@ -1,8 +1,22 @@
+using Microsoft.EntityFrameworkCore;
+using Todo.Api.Data;
 using Todo.Contracts;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
+
+// Scoped by default: one TodoDbContext per HTTP request, disposed when the request ends.
+builder.Services.AddDbContext<TodoDbContext>(options =>
+{
+    options.UseSqlServer(builder.Configuration.GetConnectionString("Todo"));
+
+    if (builder.Environment.IsDevelopment())
+    {
+        // Show parameter values in the logged SQL. Development only: they can contain user data.
+        options.EnableSensitiveDataLogging();
+    }
+});
 
 var app = builder.Build();
 
