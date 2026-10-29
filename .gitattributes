@@ -3,3 +3,6 @@
 
 # Shell scripts run in Linux containers and CI, so always use LF.
 *.sh text eol=lf
+
+# Git hooks are shell scripts too; Git for Windows runs them with its bundled sh.
+.githooks/* text eol=lf
