@@ -1,0 +1,13 @@
+# Allowlist: send the builder only what the Dockerfile copies. New files stay out unless added here,
+# so nothing reaches an image by accident.
+*
+!global.json
+!Directory.Build.props
+!Directory.Packages.props
+!dotnet-tools.json
+!src/
+
+# Build output from the host: Windows paths in obj/ break a Linux restore.
+**/bin/
+**/obj/
+**/*.user

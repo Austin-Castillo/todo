@@ -4,6 +4,9 @@
     <UserSecretsId>1d4410d0-ca0d-4e5a-a9c6-6f3f2cc8a306</UserSecretsId>
     <!-- NavigateTo during server-side rendering redirects without throwing a NavigationException (new .NET 10 behavior). -->
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <!-- Adds the package that holds blazor.web.js. The SDK adds it only when it sees .razor files in this project,
+         and the Dockerfile restores from the project files alone, before the source is copied in. -->
+    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
   </PropertyGroup>
 
   <ItemGroup>
