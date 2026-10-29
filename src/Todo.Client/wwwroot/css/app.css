@@ -1,3 +1,50 @@
+body {
+    font-family: system-ui, sans-serif;
+    max-width: 40rem;
+    margin: 2rem auto;
+    padding: 0 1rem;
+}
+
+form, .heading {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+    form input, .heading h1 {
+        flex: 1;
+    }
+
+.rows {
+    list-style: none;
+    padding: 0;
+}
+
+    .rows li {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.4rem 0;
+        border-bottom: 1px solid #ddd;
+    }
+
+        .rows li form {
+            flex: 1;
+        }
+
+.muted, .done {
+    color: #666;
+}
+
+.done {
+    text-decoration: line-through;
+}
+
+.error {
+    color: #b32121;
+}
+
 .valid.modified:not([type=checkbox]) {
     outline: 1px solid #26b050;
 }

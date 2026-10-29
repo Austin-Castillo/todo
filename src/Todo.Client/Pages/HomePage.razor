@@ -1,0 +1,70 @@
+@page "/"
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+<PageTitle>Todo</PageTitle>
+
+<h1>Todo lists</h1>
+
+<form @onsubmit="CreateList">
+    <input @bind="newListName" @bind:event="oninput" maxlength="@TodoLimits.ListNameMaxLength"
+           placeholder="New list" aria-label="New list name" />
+    <button type="submit" disabled="@(string.IsNullOrWhiteSpace(newListName) || saving)">Add</button>
+</form>
+
+@if (error is not null)
+{
+    <p class="error">@error</p>
+}
+
+@if (lists is null)
+{
+    <p>Loading...</p>
+}
+else if (lists.Count == 0)
+{
+    <p>No lists yet.</p>
+}
+else
+{
+    <ul class="rows">
+        @foreach (var list in lists)
+        {
+            <li>
+                <a href="lists/@list.Id">@list.Name</a>
+                <span class="muted">@list.CompletedCount of @list.ItemCount done</span>
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    private List<TodoListSummary>? lists;
+    private string newListName = "";
+    private bool saving;
+    private string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        lists = await Http.GetFromJsonAsync<List<TodoListSummary>>("api/lists");
+    }
+
+    private async Task CreateList()
+    {
+        // Disables the button from the first await until the response arrives, so a double click can't create two lists.
+        saving = true;
+        error = null;
+
+        var response = await Http.PostAsJsonAsync("api/lists", new CreateTodoListRequest(newListName.Trim()));
+        if (!response.IsSuccessStatusCode)
+        {
+            error = "Couldn't save the list.";
+            saving = false;
+            return;
+        }
+
+        // A new list has no items yet, so go straight to it to add some.
+        var created = await response.Content.ReadFromJsonAsync<TodoListDetails>();
+        Navigation.NavigateTo($"lists/{created!.Id}");
+    }
+}
