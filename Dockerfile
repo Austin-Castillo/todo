@@ -37,7 +37,7 @@ RUN dotnet ef migrations bundle --project src/Todo.Api --configuration Release -
 
 # The bundle loads Todo.Api.dll to configure its DbContext, so it needs the ASP.NET Core runtime too.
 # Same base as the server's image, so the two share its layers.
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.13-noble-chiseled-extra AS migrations
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.14-noble-chiseled-extra AS migrations
 WORKDIR /app
 COPY --from=bundle /app/efbundle .
 # Likewise when the bundle runs (ENV doesn't carry over from the bundle stage: this is a new image).
@@ -48,7 +48,7 @@ ENTRYPOINT ["./efbundle"]
 # Final stage, the default target: the server. The ASP.NET Core runtime only. Chiseled means no shell or package
 # manager, and it runs as the non-root "app" user. -extra adds ICU and time zone data, so culture and time zone
 # behavior match a full OS.
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.13-noble-chiseled-extra
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.14-noble-chiseled-extra
 WORKDIR /app
 COPY --from=publish /app/publish .
 
