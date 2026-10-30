@@ -18,9 +18,15 @@ builder.Services.AddOpenApi();
 builder.Services.AddValidation();
 
 // Scoped by default: one TodoDbContext per HTTP request, disposed when the request ends.
+// The migration bundle builds its TodoDbContext from this registration too, so it gets the same settings.
 builder.Services.AddDbContext<TodoDbContext>(options =>
 {
-    options.UseSqlServer(builder.Configuration.GetConnectionString("Todo"));
+    // Retries each query and SaveChanges on errors Azure SQL raises in normal running (a serverless database
+    // resuming, failovers, throttling). UseSqlServer rather than UseAzureSql, so the tests and Compose run what
+    // production runs: see ADR-0005.
+    options.UseSqlServer(
+        builder.Configuration.GetConnectionString("Todo"),
+        sqlServer => sqlServer.EnableRetryOnFailure());
 
     if (builder.Environment.IsDevelopment())
     {

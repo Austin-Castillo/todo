@@ -28,6 +28,9 @@ public sealed class TodoApiFixture : IAsyncLifetime
 
     public HttpClient CreateClient() => Factory.CreateClient();
 
+    // The app's root services, for checking its configuration. Resolve scoped services from a scope.
+    public IServiceProvider Services => Factory.Services;
+
     // A client for a variant of the app, such as another environment or a replaced service, on the same database.
     // Starts its own in-memory server; the fixture's factory disposes it along with itself.
     public HttpClient CreateClient(Action<IWebHostBuilder> configure) =>
