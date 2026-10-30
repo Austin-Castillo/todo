@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,6 +36,10 @@ public sealed class TodoApiFixture : IAsyncLifetime
     // Starts its own in-memory server; the fixture's factory disposes it along with itself.
     public HttpClient CreateClient(Action<IWebHostBuilder> configure) =>
         Factory.WithWebHostBuilder(configure).CreateClient();
+
+    // The in-memory server itself, for requests HttpClient can't make, such as one from a given remote IP.
+    public TestServer CreateServer(Action<IWebHostBuilder> configure) =>
+        Factory.WithWebHostBuilder(configure).Server;
 
     public async ValueTask InitializeAsync()
     {

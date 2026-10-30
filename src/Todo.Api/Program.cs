@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Todo.Api.Components;
 using Todo.Api.Data;
@@ -41,7 +42,22 @@ builder.Services.AddScoped<ITodoService, ServerTodoService>();
 // Error responses from the API use the Problem Details format (RFC 9457), like the validation 400s already do.
 builder.Services.AddProblemDetails();
 
+// In production, TLS ends at the Container Apps ingress, which forwards plain HTTP and records what it saw in
+// X-Forwarded-Proto (the browser's scheme) and X-Forwarded-For (the client's IP). The ingress's addresses aren't
+// fixed, so any source is trusted, which is safe here: only the ingress can reach the container, it overwrites
+// X-Forwarded-Proto, and ForwardLimit (default 1) reads only the rightmost X-Forwarded-For entry, the one it adds.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 var app = builder.Build();
+
+// First, so everything after it sees the browser's scheme and IP. Without these headers (dotnet run, Compose)
+// it changes nothing.
+app.UseForwardedHeaders();
 
 if (app.Environment.IsDevelopment())
 {
@@ -53,6 +69,11 @@ else
     // Unhandled exceptions outside Development (which shows the detailed developer exception page instead)
     // re-run the request as the Error page. The /api branch below handles API exceptions first.
     app.UseExceptionHandler("/error", createScopeForErrors: true);
+
+    // Tells browsers to use only HTTPS for this host for 30 days (the default), skipping the ingress's HTTP to HTTPS
+    // redirect. Sent only on HTTPS requests, so it relies on the forwarded headers above. Not in Development: browsers
+    // would remember it for localhost. No short first max-age: the platform's hostname always serves HTTPS.
+    app.UseHsts();
 }
 
 // Error statuses with no body, such as a 404 for an unknown URL, re-run the request as the NotFound page, keeping
@@ -72,7 +93,7 @@ app.UseWhen(IsApiRequest, api =>
     api.UseStatusCodePages();
 });
 
-// No UseHttpsRedirection: in production, HTTPS is handled by the hosting platform's ingress in front of the container.
+// No UseHttpsRedirection: in production, the ingress redirects HTTP to HTTPS before a request reaches the container.
 
 // Required by MapRazorComponents: server-rendered forms are checked for an antiforgery token.
 app.UseAntiforgery();
