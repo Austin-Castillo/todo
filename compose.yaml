@@ -37,7 +37,7 @@ services:
     build:
       context: .
       target: migrations
-    image: todo-migrations
+    image: todo-migrate
     command: ["--connection", *todo-connection]
     depends_on:
       sql:

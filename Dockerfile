@@ -1,6 +1,6 @@
 # Builds two images from one build stage. Build from the repo root.
 #   The server (Todo.Api) with the Client it serves, the default target:  docker build -t todo-api .
-#   The migration bundle, run once before the server starts (ADR-0004):  docker build --target migrations -t todo-migrations .
+#   The migration bundle, run once before the server starts (ADR-0004):  docker build --target migrations -t todo-migrate .
 # compose.yaml builds both.
 
 # Build stage: has the .NET SDK. Only its outputs reach the final images.
