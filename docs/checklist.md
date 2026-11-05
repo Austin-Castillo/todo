@@ -127,3 +127,88 @@ A user-assigned identity has three IDs: the **resource ID** (attaches it to an a
 5. Portal: the registry's Access control (IAM) → Role assignments; each identity's Overview (client ID and object ID side by side).
 
 ### D. Container Apps and the first deploy
+
+Uses the Container Apps commands built into the Azure CLI (2.91), which are the stable ones. Don't install the `containerapp` extension: it only carries preview features (`1.3.0b5`) and replaces the built-in commands while installed.
+
+#### D1. Environment and migration job
+
+_Done 2026-11-04. Leaves a migrated, empty database and nothing reachable from the internet._
+
+1. Variables. The images' SHA is set explicitly: they were built from `main`, not from this branch's `HEAD`.
+   ```powershell
+   $rg = 'rg-todo-prod'; $loc = 'centralus'; $acr = 'crtodoac1.azurecr.io'; $sha = 'c1fab8f1100b834ad3d3dedf516acd9a83db1f3a'
+   $mig = az identity show -g $rg -n id-todo-migrate --query "{clientId:clientId, id:id}" -o json | ConvertFrom-Json
+   $migConn = "Server=tcp:sql-todo-prod-ac1.database.windows.net,1433;Database=sqldb-todo;Authentication=Active Directory Managed Identity;User Id=$($mig.clientId);Encrypt=True;Connect Timeout=90"
+   ```
+   The connection string holds no secret (the client ID only says which attached identity to get a token for), so it's a plain environment variable. Same key as the server, `ConnectionStrings__Todo`: the bundle builds the same `DbContext`, retries included. `Connect Timeout=90`: see D2 (SqlClient's default of 15 seconds is shorter than a resume from auto-pause).
+2. Log Analytics workspace (the first 5 GB a month are free per billing account), and its ID and shared key for the environment. The key is a secret passed between Azure services: keep it in a variable for one command only.
+   ```powershell
+   az monitor log-analytics workspace create --resource-group $rg --workspace-name log-todo-prod --location $loc
+   $wsId = az monitor log-analytics workspace show -g $rg -n log-todo-prod --query customerId -o tsv
+   $wsKey = az monitor log-analytics workspace get-shared-keys -g $rg -n log-todo-prod --query primarySharedKey -o tsv
+   ```
+3. Environment: a workload profiles environment with the serverless Consumption profile (the CLI default), 3-5 minutes:
+   ```powershell
+   az containerapp env create --name cae-todo-prod --resource-group $rg --location $loc --logs-destination log-analytics --logs-workspace-id $wsId --logs-workspace-key $wsKey
+   Remove-Variable wsKey
+   ```
+4. Migration job: manual trigger, no retries (a failed migration needs a look, not a rerun), killed after 10 minutes, the smallest size, `id-todo-migrate` attached and used for the registry pull. "User identity … is already assigned" is only the CLI noticing the same identity twice.
+   `az containerapp job create --name caj-todo-migrate --resource-group $rg --environment cae-todo-prod --trigger-type Manual --replica-timeout 600 --replica-retry-limit 0 --replica-completion-count 1 --parallelism 1 --image "$acr/todo-migrate:$sha" --registry-server $acr --registry-identity $mig.id --mi-user-assigned $mig.id --cpu 0.25 --memory 0.5Gi --env-vars "ConnectionStrings__Todo=$migConn"`
+5. Run it, and repeat the list until `Succeeded` or `Failed`. The first run took 86 seconds (image pull, and the database resuming from a pause):
+   ```powershell
+   az containerapp job start --name caj-todo-migrate --resource-group $rg
+   az containerapp job execution list --name caj-todo-migrate --resource-group $rg --query "[].{name:name, status:properties.status, start:properties.startTime}" -o table
+   ```
+6. Logs: the job's Execution history → Console logs, or the workspace's Logs (they arrive a few minutes late; lines with the same timestamp come out in any order):
+   ```kusto
+   ContainerAppConsoleLogs_CL
+   | where ContainerJobName_s == "caj-todo-migrate"
+   | project TimeGenerated, Log_s
+   | order by TimeGenerated asc
+   ```
+7. Check the database, then disconnect: `SELECT MigrationId FROM __EFMigrationsHistory;` shows `20261022020242_InitialCreate`; `sys.tables` shows `TodoLists`, `TodoItems` and `__EFMigrationsHistory`.
+
+#### D2. The server
+
+_Done 2026-11-04/05, except the cold-load check (5.6)._
+
+1. Variables: the identity, its connection string, my public IP (`/32` in the rule means exactly this address):
+   ```powershell
+   $rg = 'rg-todo-prod'; $acr = 'crtodoac1.azurecr.io'; $sha = 'c1fab8f1100b834ad3d3dedf516acd9a83db1f3a'
+   $api = az identity show -g $rg -n id-todo-api --query "{clientId:clientId, id:id}" -o json | ConvertFrom-Json
+   $apiConn = "Server=tcp:sql-todo-prod-ac1.database.windows.net,1433;Database=sqldb-todo;Authentication=Active Directory Managed Identity;User Id=$($api.clientId);Encrypt=True;Connect Timeout=90"
+   $myip = (curl.exe -s https://api.ipify.org)
+   ```
+2. Create the app on a placeholder that also listens on 8080 (Microsoft's ASP.NET sample), so nothing of ours is public before the IP rule exists. External ingress, `allowInsecure` off (plain HTTP gets a 301 from the ingress), scale to zero, at most one replica, the smallest size; `id-todo-api` attached and used for registry pulls. Ingress adds default TCP probes on 8080: they don't touch the database.
+   `az containerapp create --name ca-todo-api --resource-group $rg --environment cae-todo-prod --image mcr.microsoft.com/dotnet/samples:aspnetapp --ingress external --target-port 8080 --min-replicas 0 --max-replicas 1 --cpu 0.25 --memory 0.5Gi --user-assigned $api.id --registry-server $acr --registry-identity $api.id`
+3. Restrict the ingress straight away. With any Allow rule, every other address gets a 403 from the ingress. The rule is app-scope configuration, so it covers every revision. Replace it when my ISP changes my IP.
+   ```powershell
+   az containerapp ingress access-restriction set --name ca-todo-api --resource-group $rg --rule-name austin-home --ip-address "$myip/32" --action Allow --description "Home IP"
+   az containerapp ingress access-restriction list --name ca-todo-api --resource-group $rg -o table
+   ```
+4. Our image and its connection string: a template change, so a new revision, which takes the traffic once healthy.
+   ```powershell
+   az containerapp update --name ca-todo-api --resource-group $rg --image "$acr/todo-api:$sha" --set-env-vars "ConnectionStrings__Todo=$apiConn"
+   az containerapp revision list --name ca-todo-api --resource-group $rg --query "[].{name:name, active:properties.active, health:properties.healthState, traffic:properties.trafficWeight}" -o table
+   az containerapp show --name ca-todo-api --resource-group $rg --query properties.configuration.ingress.fqdn -o tsv
+   ```
+   `revision list` shows active revisions only; `--all` includes the inactive ones.
+
+**The first load failed (2026-11-05), and the fix.** The first page load, with the database paused, showed the Error page. The login waited SqlClient's default 15 seconds (`Connect Timeout`), gave up with error -2 ("Connection Timeout Expired … post-login phase"), and EF didn't retry: its retrying strategy treats 40613 (what a resuming database sometimes returns, as it did for the migration job) as transient, but not a timeout. The database finished resuming about 50 seconds after the first attempt. Fix: `Connect Timeout=90` in both connection strings (only opening a connection waits longer; query timeouts stay at 30 seconds; a database that's really down takes 90 seconds to show the Error page). Not adding -2 to EF's retryable errors: it also means a query timed out, and repeating slow queries or a committed `SaveChanges` would multiply load and duplicates. Applied with `az containerapp job update … --set-env-vars` and `az containerapp update … --set-env-vars` (revision 2).
+
+Also seen: billed compute (the database's `app_cpu_billed` metric, 5-minute buckets) showed it paused about 35 minutes after the last activity, sooner than its 60-minute auto-pause delay. Unexplained; assume it can be paused after half an hour idle.
+
+5. Checks on the first deploy (DevTools → Network with Preserve log on):
+   1. `http://<fqdn>` the first time: a 301 from the ingress to `https://`, then the page with `strict-transport-security: max-age=2592000` (30 days). Check with a browser that hasn't seen the site yet: once HSTS is cached, the 301 is gone for good.
+   2. `http://<fqdn>` again: a 307 Internal Redirect. The browser rewrites to HTTPS itself; no request leaves.
+   3. Create a list and an item, reload: the data comes from Azure SQL.
+   4. From my phone with Wi-Fi off (another IP): 403 from the ingress.
+   5. The startup logs show the Data Protection warnings (keys stored inside the container, unencrypted): harmless while nothing validates protected data; Stage 1.2's sign-in needs the key ring outside the container, encrypted with Key Vault.
+      ```kusto
+      ContainerAppConsoleLogs_CL
+      | where ContainerAppName_s == "ca-todo-api"
+      | project TimeGenerated, Log_s
+      | order by TimeGenerated asc
+      ```
+   6. **Still to do:** after at least 40 minutes idle (the app scaled to zero, the database paused), load the page: slow, not the Error page. Confirm the pause from the database's `app_cpu_billed` metric.
+   - The client IP in the logs can't be checked yet: nothing logs requests (`Microsoft.AspNetCore` logs at Warning). It moves to Application Insights and structured logs.

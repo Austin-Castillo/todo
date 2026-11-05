@@ -42,7 +42,7 @@ WORKDIR /app
 COPY --from=bundle /app/efbundle .
 # Likewise when the bundle runs (ENV doesn't carry over from the bundle stage: this is a new image).
 ENV ASPNETCORE_ENVIRONMENT=Production
-# Pass the connection with --connection when running it.
+# Give it the connection with --connection, or as ConnectionStrings__Todo like the server (it builds the same DbContext).
 ENTRYPOINT ["./efbundle"]
 
 # Final stage, the default target: the server. The ASP.NET Core runtime only. Chiseled means no shell or package
