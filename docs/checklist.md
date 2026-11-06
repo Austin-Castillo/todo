@@ -172,7 +172,7 @@ _Done 2026-11-04. Leaves a migrated, empty database and nothing reachable from t
 
 #### D2. The server
 
-_Done 2026-11-04/05, except the cold-load check (5.6)._
+_Done 2026-11-04/05; the cold-load check (5.6) on 2026-11-05._
 
 1. Variables: the identity, its connection string, my public IP (`/32` in the rule means exactly this address):
    ```powershell
@@ -212,7 +212,7 @@ Also seen: billed compute (the database's `app_cpu_billed` metric, 5-minute buck
       | project TimeGenerated, Log_s
       | order by TimeGenerated asc
       ```
-   6. **Still to do:** after at least 40 minutes idle (the app scaled to zero, the database paused), load the page: slow, not the Error page. Confirm the pause from the database's `app_cpu_billed` metric.
+   6. After at least 40 minutes idle (the app scaled to zero, the database paused), load the page: slow, not the Error page. Check first that the database says `Paused` (`az sql db show … --query status`); the `app_cpu_billed` metric lags by several minutes. On 2026-11-05 the page took about 70 seconds: about 16 seconds to start a replica, then the first login got 40613 and EF's retry succeeded. The logs alone can't say whether `Connect Timeout=90` was needed that time, since console lines reach Log Analytics in batches.
    - The client IP in the logs can't be checked yet: nothing logs requests (`Microsoft.AspNetCore` logs at Warning). It moves to Application Insights and structured logs.
 
 ### E. Continuous deployment
@@ -231,9 +231,9 @@ _Done 2026-11-05 (ADR-0007). No cost._
    $dep = az identity show -g $rg -n id-todo-deploy --query "{clientId:clientId, principalId:principalId, tenantId:tenantId}" -o json | ConvertFrom-Json
    $dep | Format-List
    ```
-3. The federated credential: Entra accepts a GitHub token as this identity only when the token's issuer, subject and audience match exactly. The subject is the `main` branch: pull requests (`repo:…:pull_request`) and other branches don't match. Renaming the repo or the account changes the subject and stops deploys until this is updated.
+3. The federated credential: Entra accepts a GitHub token as this identity only when the token's issuer, subject and audience match exactly. The subject is the `main` branch: pull requests (`repo:…:pull_request`) and other branches don't match. GitHub puts the account's and the repo's immutable IDs in the subject (`Austin-Castillo@46911493/todo@1438831791`), so a repo recreated under the same name doesn't match; read the exact prefix with `gh api repos/Austin-Castillo/todo/actions/oidc/customization/sub` (`sub_claim_prefix`). The names are still in it: renaming the repo or the account stops deploys until this is updated.
    ```powershell
-   az identity federated-credential create --resource-group $rg --identity-name id-todo-deploy --name github-main --issuer https://token.actions.githubusercontent.com --subject repo:Austin-Castillo/todo:ref:refs/heads/main --audiences api://AzureADTokenExchange
+   az identity federated-credential create --resource-group $rg --identity-name id-todo-deploy --name github-main --issuer https://token.actions.githubusercontent.com --subject "repo:Austin-Castillo@46911493/todo@1438831791:ref:refs/heads/main" --audiences api://AzureADTokenExchange
    az identity federated-credential list --resource-group $rg --identity-name id-todo-deploy -o table
    ```
 4. Roles, each scoped to one resource (never the resource group): push images, update and start the migration job, update the server. Both Contributor roles allow more than the deploy needs (the app's ingress rules; the job's identity, variables and command); accepted in ADR-0007, since choosing the image already means choosing the code. A new identity can take a minute to appear in the list.
@@ -261,3 +261,30 @@ _Done 2026-11-05 (ADR-0007). No cost._
    az containerapp job execution list --name caj-todo-migrate --resource-group $rg --query "[].{name:name, status:properties.status, start:properties.startTime}" -o table
    ```
    **Don't use `az containerapp job start --image`.** It replaces the execution's whole container rather than just its image: the execution ran with no environment variables and default CPU and memory, and failed with "The ConnectionString property has not been initialized" (2026-11-05). `job update --image` changes only the image in the job's definition.
+
+#### E2. The deploy
+
+_Since 2026-11-06 (PR #15): every push to `main` deploys. No manual steps._
+
+What one run does (`.github/workflows/ci.yaml`), in order:
+1. `Build and test` and `Image smoke test` run in parallel, as on a pull request.
+2. The image job, on `main` only, signs in as `id-todo-deploy` (OIDC) and pushes `todo-api` and `todo-migrate` tagged with the commit SHA: the images the smoke test just ran.
+3. `Deploy` starts once both jobs have passed, and signs in again (each job is a fresh runner).
+4. It sets `caj-todo-migrate`'s image to the new `todo-migrate`, starts it and polls the execution. The database may need a minute or two to resume. A failed execution stops the deploy: the server isn't touched, and the old revision keeps serving.
+5. It sets `ca-todo-api`'s image to the new `todo-api`, which creates a revision, and waits for it to be ready. A new revision shows `None` / `Activating` at first and `Healthy` about a minute later. Single revision mode keeps the old revision serving until then.
+
+Follow a run: the Actions tab, or `gh run watch`. Afterwards, from Azure's side:
+```powershell
+$rg = 'rg-todo-prod'
+az containerapp revision list --name ca-todo-api --resource-group $rg --query "[].{revision:name, image:properties.template.containers[0].image, health:properties.healthState, traffic:properties.trafficWeight}" -o table
+az containerapp job execution list --name caj-todo-migrate --resource-group $rg --query "[0:3].{name:name, status:properties.status, start:properties.startTime}" -o table
+az acr repository show-tags --name crtodoac1 --repository todo-api -o tsv
+```
+In the portal, the resource group's Activity log shows each change to the job and the app with `id-todo-deploy` as the caller.
+
+**The first run failed at sign-in (2026-11-06).** `AADSTS700213: No matching federated identity record found for presented assertion subject 'repo:Austin-Castillo@46911493/todo@1438831791:ref:refs/heads/main'`. The credential had been created with the older, names-only subject. Nothing was pushed or deployed. Fixed by updating the subject (E1.3 now has the right one), then re-running the failed jobs:
+```powershell
+az identity federated-credential update --resource-group rg-todo-prod --identity-name id-todo-deploy --name github-main --issuer https://token.actions.githubusercontent.com --subject "repo:Austin-Castillo@46911493/todo@1438831791:ref:refs/heads/main" --audiences api://AzureADTokenExchange
+gh run rerun <run id> --failed
+```
+`azure/login` prints the token's subject ("Federated token details") before it tries to sign in: compare it with the credential when sign-in fails.

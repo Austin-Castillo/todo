@@ -59,8 +59,9 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      # Lets the job ask GitHub for an OIDC token. On a pull request the token's subject is
-      # repo:...:pull_request, which no federated credential accepts, so PR runs can't sign in to Azure.
+      # Lets the job ask GitHub for an OIDC token, to push the images on main. Permissions can't depend on the event,
+      # so PR runs have it too: their token's subject is repo:...:pull_request, which no federated credential
+      # accepts, so they can't sign in to Azure.
       id-token: write
     env:
       # For the throwaway SQL Server that lives and dies on this runner, so not a secret.
@@ -166,6 +167,25 @@ jobs:
         run: |
           az containerapp update --name "$SERVER_APP" --resource-group "$RESOURCE_GROUP" \
             --image "$REGISTRY/todo-api:$GITHUB_SHA" --output none
+          revision=$(az containerapp show --name "$SERVER_APP" --resource-group "$RESOURCE_GROUP" \
+            --query properties.latestRevisionName --output tsv)
+          echo "Created $revision"
+          # A new revision reports no health while it activates, then Healthy (about a minute on the first deploy).
+          ready=false
+          for _ in $(seq 30); do
+            sleep 10
+            health=$(az containerapp revision show --name "$SERVER_APP" --resource-group "$RESOURCE_GROUP" \
+              --revision "$revision" --query properties.healthState --output tsv)
+            echo "$(date -u +%H:%M:%S) $health"
+            case "$health" in
+              Healthy) ready=true; break ;;
+              Unhealthy) break ;;
+            esac
+          done
           az containerapp revision list --name "$SERVER_APP" --resource-group "$RESOURCE_GROUP" \
             --query "[].{revision:name, image:properties.template.containers[0].image, health:properties.healthState, running:properties.runningState, traffic:properties.trafficWeight}" \
             --output table
+          if [ "$ready" != true ]; then
+            echo "::error::$revision is not healthy (last: ${health:-none}). The previous revision keeps serving until it is."
+            exit 1
+          fi
