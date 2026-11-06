@@ -1,4 +1,5 @@
-# Builds and tests every pull request, and main after each merge. Two jobs, run in parallel on fresh runners.
+# Builds and tests every pull request, and main after each merge: two jobs, run in parallel on fresh runners.
+# On main, the image job also pushes the images it smoke-tested, and a third job deploys them to Azure (ADR-0007).
 
 name: CI
 
@@ -11,10 +12,17 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same branch or PR cancels the run still in progress for it.
+# A newer push to the same PR cancels the run still in progress for it. On main, runs queue instead: cancelling one
+# could stop a deploy between the migrations and the server update. (Only one run waits; a newer one replaces it.)
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Where main deploys to. The IDs that sign in to Azure are repository variables (not secrets: GitHub's signed token
+# for this repo's main is what gets in; see docs/checklist.md, E1).
+env:
+  REGISTRY: crtodoac1.azurecr.io
+  RESOURCE_GROUP: rg-todo-prod
 
 jobs:
   build-test:
@@ -49,6 +57,11 @@ jobs:
     name: Image smoke test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      # Lets the job ask GitHub for an OIDC token. On a pull request the token's subject is
+      # repo:...:pull_request, which no federated credential accepts, so PR runs can't sign in to Azure.
+      id-token: write
     env:
       # For the throwaway SQL Server that lives and dies on this runner, so not a secret.
       MSSQL_SA_PASSWORD: Ci-${{ github.run_id }}-Pw1!
@@ -79,6 +92,80 @@ jobs:
           check /api/lists 200
           check /no-such-page 404
 
+      # Build once: on main, push the images that just passed, tagged with the commit (never rebuilt for the deploy).
+      - name: Sign in to Azure
+        if: github.event_name == 'push'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Push the images
+        if: github.event_name == 'push'
+        run: |
+          az acr login --name "${REGISTRY%%.*}"
+          for image in todo-api todo-migrate; do
+            docker tag "$image" "$REGISTRY/$image:$GITHUB_SHA"
+            docker push "$REGISTRY/$image:$GITHUB_SHA"
+          done
+
       - name: Show container logs
         if: failure()
         run: docker compose logs
+
+  deploy:
+    name: Deploy
+    # Main only, and only once both CI jobs have passed: the tests, and the smoke test of the images it deploys.
+    if: github.event_name == 'push'
+    needs: [build-test, image]
+    runs-on: ubuntu-latest
+    # The migration job's own limit is 10 minutes; the server update takes a minute or two.
+    timeout-minutes: 20
+    permissions:
+      id-token: write
+    env:
+      MIGRATION_JOB: caj-todo-migrate
+      SERVER_APP: ca-todo-api
+    steps:
+      - name: Sign in to Azure
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Migrations first, while the old server still runs (each migration works with the old code: ADR-0004).
+      # job update changes only the image in the job's definition; job start --image would replace the whole
+      # container and drop its connection string (docs/checklist.md, E1.6).
+      - name: Run the migrations
+        run: |
+          az containerapp job update --name "$MIGRATION_JOB" --resource-group "$RESOURCE_GROUP" \
+            --image "$REGISTRY/todo-migrate:$GITHUB_SHA" --output none
+          execution=$(az containerapp job start --name "$MIGRATION_JOB" --resource-group "$RESOURCE_GROUP" --query name --output tsv)
+          echo "Started $execution"
+          # Up to 11 minutes, a little over the job's own 10-minute limit.
+          for _ in $(seq 66); do
+            sleep 10
+            status=$(az containerapp job execution show --name "$MIGRATION_JOB" --resource-group "$RESOURCE_GROUP" \
+              --job-execution-name "$execution" --query properties.status --output tsv)
+            echo "$(date -u +%H:%M:%S) $status"
+            case "$status" in
+              Succeeded) exit 0 ;;
+              Failed|Stopped|Degraded)
+                echo "::error::Migration $execution: $status. The server was not updated. Its output is in Log Analytics, a few minutes late:"
+                echo "ContainerAppConsoleLogs_CL | where ContainerJobName_s == \"$MIGRATION_JOB\" | order by TimeGenerated asc"
+                exit 1 ;;
+            esac
+          done
+          echo "::error::Migration $execution still not finished after 11 minutes. The server was not updated."
+          exit 1
+
+      # A new revision; it takes the traffic once healthy, and the old one keeps serving until then.
+      - name: Deploy the server
+        run: |
+          az containerapp update --name "$SERVER_APP" --resource-group "$RESOURCE_GROUP" \
+            --image "$REGISTRY/todo-api:$GITHUB_SHA" --output none
+          az containerapp revision list --name "$SERVER_APP" --resource-group "$RESOURCE_GROUP" \
+            --query "[].{revision:name, image:properties.template.containers[0].image, health:properties.healthState, running:properties.runningState, traffic:properties.trafficWeight}" \
+            --output table

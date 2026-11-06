@@ -6,7 +6,8 @@ The whole path from code to a running app on Azure, step by step: every portal a
 
 - Region: `centralus`. Everything in one region. `eastus2` was the first choice (closest to Florida), but on 2026-11-02 both it and `eastus` refused new SQL servers for this Pay-As-You-Go subscription (`RegionDoesNotAllowProvisioning`). Create the SQL server first in a new region: it's the resource most likely to be refused.
 - Network to Azure SQL: public endpoint, "Allow Azure services", Entra-only authentication (ADR-0006).
-- Identities: user-assigned, one per workload (`id-todo-api`, `id-todo-migrate`), so they exist before the app and the job.
+- Identities: user-assigned, one per workload (`id-todo-api`, `id-todo-migrate`, `id-todo-deploy`), so they exist before the app and the job.
+- Deploys: GitHub Actions signs in as `id-todo-deploy` through an OIDC federated credential for `main` (no stored secret), pushes the smoke-tested images, runs the migration job with the new image, then updates the server (ADR-0007).
 - Key Vault: not in Stage 0. With managed identities there's no secret to store. Planned for Stage 1.2, where sign-in cookies need the Data Protection key ring kept outside the container and encrypted with a Key Vault key.
 - Creates run in the CLI (PowerShell); the portal is for looking.
 
@@ -26,6 +27,7 @@ Cloud Adoption Framework abbreviations; `ac1` makes globally unique names unique
 | Container Apps job (the migration bundle) | `caj-todo-migrate` |
 | Server identity | `id-todo-api` |
 | Migration identity | `id-todo-migrate` |
+| Deploy identity (GitHub Actions) | `id-todo-deploy` |
 
 ## Steps
 
@@ -212,3 +214,50 @@ Also seen: billed compute (the database's `app_cpu_billed` metric, 5-minute buck
       ```
    6. **Still to do:** after at least 40 minutes idle (the app scaled to zero, the database paused), load the page: slow, not the Error page. Confirm the pause from the database's `app_cpu_billed` metric.
    - The client IP in the logs can't be checked yet: nothing logs requests (`Microsoft.AspNetCore` logs at Warning). It moves to Application Insights and structured logs.
+
+### E. Continuous deployment
+
+#### E1. The deploy identity
+
+_Done 2026-11-05 (ADR-0007). No cost._
+
+1. Variables:
+   ```powershell
+   $rg = 'rg-todo-prod'; $loc = 'centralus'
+   ```
+2. The identity, and its IDs (GitHub needs the client ID and the tenant ID; role assignments need the principal ID):
+   ```powershell
+   az identity create --resource-group $rg --name id-todo-deploy --location $loc
+   $dep = az identity show -g $rg -n id-todo-deploy --query "{clientId:clientId, principalId:principalId, tenantId:tenantId}" -o json | ConvertFrom-Json
+   $dep | Format-List
+   ```
+3. The federated credential: Entra accepts a GitHub token as this identity only when the token's issuer, subject and audience match exactly. The subject is the `main` branch: pull requests (`repo:…:pull_request`) and other branches don't match. Renaming the repo or the account changes the subject and stops deploys until this is updated.
+   ```powershell
+   az identity federated-credential create --resource-group $rg --identity-name id-todo-deploy --name github-main --issuer https://token.actions.githubusercontent.com --subject repo:Austin-Castillo/todo:ref:refs/heads/main --audiences api://AzureADTokenExchange
+   az identity federated-credential list --resource-group $rg --identity-name id-todo-deploy -o table
+   ```
+4. Roles, each scoped to one resource (never the resource group): push images, update and start the migration job, update the server. Both Contributor roles allow more than the deploy needs (the app's ingress rules; the job's identity, variables and command); accepted in ADR-0007, since choosing the image already means choosing the code. A new identity can take a minute to appear in the list.
+   ```powershell
+   $acrId = az acr show -n crtodoac1 --query id -o tsv
+   $jobId = az containerapp job show -n caj-todo-migrate -g $rg --query id -o tsv
+   $appId = az containerapp show -n ca-todo-api -g $rg --query id -o tsv
+   az role assignment create --assignee-object-id $dep.principalId --assignee-principal-type ServicePrincipal --role AcrPush --scope $acrId
+   az role assignment create --assignee-object-id $dep.principalId --assignee-principal-type ServicePrincipal --role "Container Apps Jobs Contributor" --scope $jobId
+   az role assignment create --assignee-object-id $dep.principalId --assignee-principal-type ServicePrincipal --role "Container Apps Contributor" --scope $appId
+   az role assignment list --assignee $dep.principalId --all --query "[].{role:roleDefinitionName, scope:scope}" -o table
+   ```
+5. The three IDs as repository variables (identifiers, not secrets; anyone who has them still needs a token GitHub signed for this repo's `main`):
+   ```powershell
+   gh variable set AZURE_CLIENT_ID --body $dep.clientId
+   gh variable set AZURE_TENANT_ID --body $dep.tenantId
+   gh variable set AZURE_SUBSCRIPTION_ID --body (az account show --query id -o tsv)
+   gh variable list
+   ```
+6. Rehearse the deploy's two job commands with the image the job already runs (no migrations are pending, so nothing changes): update the job's image, then start it. Repeat the list until `Succeeded`; the execution's logs end with "No migrations were applied. The database is already up to date."
+   ```powershell
+   $sha = 'c1fab8f1100b834ad3d3dedf516acd9a83db1f3a'
+   az containerapp job update --name caj-todo-migrate --resource-group $rg --image "crtodoac1.azurecr.io/todo-migrate:$sha"
+   az containerapp job start --name caj-todo-migrate --resource-group $rg
+   az containerapp job execution list --name caj-todo-migrate --resource-group $rg --query "[].{name:name, status:properties.status, start:properties.startTime}" -o table
+   ```
+   **Don't use `az containerapp job start --image`.** It replaces the execution's whole container rather than just its image: the execution ran with no environment variables and default CPU and memory, and failed with "The ConnectionString property has not been initialized" (2026-11-05). `job update --image` changes only the image in the job's definition.
