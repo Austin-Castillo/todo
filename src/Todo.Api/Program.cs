@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
+using Todo.Api;
 using Todo.Api.Components;
 using Todo.Api.Data;
 using Todo.Api.Endpoints;
@@ -7,6 +8,22 @@ using Todo.Api.Services;
 using Todo.Contracts;
 
 var builder = WebApplication.CreateBuilder(args);
+
+if (!builder.Environment.IsDevelopment())
+{
+    // One JSON object per log entry, instead of the default text that spreads one entry over several lines (each
+    // its own row in Log Analytics). The template's placeholders become fields, and the scopes add the trace ID,
+    // which ties a console line to its request in Application Insights. Development keeps the readable text.
+    builder.Logging.AddJsonConsole(options =>
+    {
+        options.IncludeScopes = true;
+        options.UseUtcTimestamp = true;
+        options.TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffZ";
+    });
+}
+
+// Application Insights through OpenTelemetry, only where APPLICATIONINSIGHTS_CONNECTION_STRING is set. See ADR-0008.
+builder.AddTodoTelemetry();
 
 // Blazor Web App: the server renders the page shell (Components/App.razor); the pages run in the browser as WebAssembly.
 builder.Services.AddRazorComponents()
@@ -38,6 +55,9 @@ builder.Services.AddDbContext<TodoDbContext>(options =>
 
 // Used by the API endpoints, and by server-side rendering of the pages. The Client registers its own HTTP version.
 builder.Services.AddScoped<ITodoService, ServerTodoService>();
+
+// /alive for the Container Apps probes, /health (the database too) in Development. See ADR-0009.
+builder.Services.AddTodoHealthChecks();
 
 // Error responses from the API use the Problem Details format (RFC 9457), like the validation 400s already do.
 builder.Services.AddProblemDetails();
@@ -104,6 +124,8 @@ app.MapStaticAssets();
 var api = app.MapGroup("/api");
 api.MapTodoListEndpoints();
 api.MapTodoItemEndpoints();
+
+app.MapTodoHealthChecks();
 
 // The client's @page routes are registered here too, so a deep link like /lists/3 renders the app without a fallback.
 // Unknown paths, /api ones included, match nothing and return 404.
