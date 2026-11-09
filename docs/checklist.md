@@ -345,4 +345,48 @@ The friendly `az monitor app-insights` commands are in a CLI extension; `az reso
    ```
    No rows for `/alive` (filtered in the app).
 
-**The client-IP check (2026-11-08).** The first rows all said Des Moines (`centralus`) and `http://`, from Florida over HTTPS. The ASP.NET Core instrumentation records the scheme when the request's span starts, before `UseForwardedHeaders` runs, and records no client address for HTTP requests at all (only for gRPC), so ingestion located the address the telemetry was uploaded from: the container's. The app now records `url.scheme` and `client.address` when the span stops, after the middleware (`EnrichWithHttpResponse`). Ingestion still masks the address (`client_IP` is `0.0.0.0`) and keeps only the location derived from it. A city in Florida means the app saw my IP: the ingress appends it as the rightmost `X-Forwarded-For` entry, as PR #13 assumed.
+**The client-IP check (2026-11-08).** The first rows all said Des Moines (`centralus`) and `http://`, from Florida over HTTPS. The ASP.NET Core instrumentation records the scheme when the request's span starts, before `UseForwardedHeaders` runs, and records no client address for HTTP requests at all (only for gRPC), so ingestion located the address the telemetry was uploaded from: the container's. The app now records `url.scheme` and `client.address` when the span stops, after the middleware (`EnrichWithHttpResponse`). Ingestion still masks the address (`client_IP` is `0.0.0.0`) and keeps only the location derived from it. A city in Florida means the app saw my IP: the ingress appends it as the rightmost `X-Forwarded-For` entry, as PR #13 assumed. Checked 2026-11-09 after PR #18 deployed: the new rows showed Florida, `https://` URLs and `client_IP` `0.0.0.0`.
+
+#### F2. Health probes
+
+_Done 2026-11-09 (ADR-0009). No cost._
+
+Startup, liveness and readiness probes, all `GET /alive` on 8080. Without them the platform adds a TCP probe for each type, which only proves the socket accepts connections; defining only some types leaves TCP defaults for the rest. Liveness and readiness start once startup has passed.
+
+| Probe | Every | Timeout | Fails after | On failure |
+| --- | --- | --- | --- | --- |
+| Startup | 2 s | 3 s | 30 (60 s) | Restart |
+| Liveness | 10 s | 3 s | 3 (about 30 s) | Restart |
+| Readiness | 5 s | 3 s | 3 (about 15 s) | Out of routing, no restart |
+
+The CLI has no probe flags, so: read the app's template (the part of the app that each revision snapshots: containers, probes, scale), add the probes to the container, and send the whole template back with an ARM `PATCH`. Copying the current template keeps the image, the variables and the resources.
+
+1. Read the template. No probes are listed beforehand: the TCP defaults are added at run time, not stored.
+   ```powershell
+   $rg = 'rg-todo-prod'
+   $app = az containerapp show -n ca-todo-api -g $rg -o json | ConvertFrom-Json
+   $app.properties.template.containers[0].probes
+   ```
+2. Add the probes to the copy in `$app` (local only):
+   ```powershell
+   function New-Probe($type, $period, $failures) { @{ type = $type; httpGet = @{ path = '/alive'; port = 8080 }; periodSeconds = $period; timeoutSeconds = 3; failureThreshold = $failures } }
+   $app.properties.template.containers[0] | Add-Member -Force -NotePropertyName probes -NotePropertyValue @((New-Probe 'Startup' 2 30), (New-Probe 'Liveness' 10 3), (New-Probe 'Readiness' 5 3))
+   @{ properties = @{ template = $app.properties.template } } | ConvertTo-Json -Depth 20 | Set-Content "$env:TEMP\probes.json"
+   ```
+3. Send it (a new revision). **Use the API version the template was read with**: the CLI reads with `2025-07-01` (see it with `--debug`). `2024-03-01` refused the body with a 400, "Unknown properties cooldownPeriod, pollingInterval in ContainerAppScale", nothing applied. The `PATCH` answers 202 Accepted with an empty body and finishes in the background, so `--query` prints nothing; check with step 4.
+   ```powershell
+   az rest --method patch --url "https://management.azure.com$($app.id)?api-version=2025-07-01" --body "@$env:TEMP\probes.json"
+   ```
+4. Check: the template has the three probes, the same image and all three variables; the new revision becomes `Healthy` with 100% traffic (revision 8, on 2026-11-09), which means startup and readiness both got a 200 from `/alive`.
+   ```powershell
+   az containerapp show -n ca-todo-api -g $rg --query "{state:properties.provisioningState, image:properties.template.containers[0].image, env:properties.template.containers[0].env[].name, probes:properties.template.containers[0].probes[].{type:type, path:httpGet.path, period:periodSeconds, failures:failureThreshold}}" -o json
+   az containerapp revision list -n ca-todo-api -g $rg --query "[].{name:name, health:properties.healthState, traffic:properties.trafficWeight}" -o table
+   ```
+5. The probes stay out of the telemetry (filtered in the app): no `GET /alive` row.
+   ```kusto
+   requests
+   | where timestamp > ago(30m)
+   | summarize count() by name
+   ```
+   Probe failures and restarts appear in the platform's own log, `ContainerAppSystemLogs_CL`.
+6. After the next deploy, check that CI's `az containerapp update --image` kept the probes (step 4's first command on the new revision).
