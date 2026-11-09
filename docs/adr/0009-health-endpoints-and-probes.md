@@ -34,5 +34,5 @@ _What follows, good and bad: what gets easier, what you give up, what to watch f
 - Nothing probes the database in production. Its health shows only through real requests: failed SQL dependencies and exceptions in Application Insights.
 - `/alive` answers anyone the ingress lets through (only my IP, today). It reveals only that the app is up.
 - Probe requests are filtered out of telemetry (ADR-0008), so a failing probe appears only in the platform's system logs and as restarts.
-- The probes are part of the Container App's configuration, not of the deploy: CI's `az containerapp update --image` should change only the image and keep them (to confirm on the first deploy after they're set). Stage 1.2's Terraform should define them.
-- Revisit for any app with several replicas that can fail independently (a dependency one replica can lose while others keep it), where readiness can route around the failure. ERP-lite (Stage 1) should make its own call rather than copy this one.
+- The probes are part of the Container App's configuration, not of the deploy: CI's `az containerapp update --image` should change only the image and keep them (to confirm on the first deploy after they're set). If this app's infrastructure moves into code, the probes belong there too.
+- This reasoning is specific to this app (one replica, one shared serverless database). An app with several replicas that can fail independently, through a dependency one replica can lose while others keep it, may want a database check in readiness, since there it can route around the failure.

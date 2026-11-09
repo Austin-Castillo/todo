@@ -8,6 +8,7 @@ The whole path from code to a running app on Azure, step by step: every portal a
 - Network to Azure SQL: public endpoint, "Allow Azure services", Entra-only authentication (ADR-0006).
 - Identities: user-assigned, one per workload (`id-todo-api`, `id-todo-migrate`, `id-todo-deploy`), so they exist before the app and the job.
 - Deploys: GitHub Actions signs in as `id-todo-deploy` through an OIDC federated credential for `main` (no stored secret), pushes the smoke-tested images, runs the migration job with the new image, then updates the server (ADR-0007).
+- Telemetry: the Azure Monitor OpenTelemetry Distro in the app, sending to a workspace-based Application Insights resource as `id-todo-api`, with local auth disabled; every trace kept, the health endpoints left out (ADR-0008). The probes call `/alive`, which never touches the database (ADR-0009).
 - Key Vault: not in Stage 0. With managed identities there's no secret to store. Planned for Stage 1.2, where sign-in cookies need the Data Protection key ring kept outside the container and encrypted with a Key Vault key.
 - Creates run in the CLI (PowerShell); the portal is for looking.
 
@@ -22,6 +23,7 @@ Cloud Adoption Framework abbreviations; `ac1` makes globally unique names unique
 | Azure SQL logical server | `sql-todo-prod-ac1` |
 | Azure SQL database | `sqldb-todo` |
 | Log Analytics workspace | `log-todo-prod` |
+| Application Insights | `appi-todo-prod` |
 | Container Apps environment | `cae-todo-prod` |
 | Container App (the server) | `ca-todo-api` |
 | Container Apps job (the migration bundle) | `caj-todo-migrate` |
@@ -288,3 +290,59 @@ az identity federated-credential update --resource-group rg-todo-prod --identity
 gh run rerun <run id> --failed
 ```
 `azure/login` prints the token's subject ("Federated token details") before it tries to sign in: compare it with the credential when sign-in fails.
+
+### F. Observability
+
+#### F1. Application Insights
+
+_Done 2026-11-08 (ADR-0008; the code in PR #17). No cost of its own: the rows land in `log-todo-prod`, inside its free 5 GB a month._
+
+The friendly `az monitor app-insights` commands are in a CLI extension; `az resource create` makes the same ARM resource (`Microsoft.Insights/components`) without one. Monitoring Metrics Publisher is the data-plane role for sending telemetry of every kind, and only that.
+
+1. Variables:
+   ```powershell
+   $rg = 'rg-todo-prod'; $loc = 'centralus'; $appi = 'appi-todo-prod'
+   $wsResId = az monitor log-analytics workspace show -g $rg -n log-todo-prod --query id -o tsv
+   $api = az identity show -g $rg -n id-todo-api --query "{clientId:clientId, principalId:principalId}" -o json | ConvertFrom-Json
+   ```
+2. The resource: workspace-based on `log-todo-prod`, local auth disabled from the start (only Entra sign-ins can send). The JSON goes through a file: `az` on Windows is a batch file that mangles quotes in arguments.
+   ```powershell
+   @{
+     location   = $loc
+     kind       = 'web'
+     tags       = @{ app = 'todo'; env = 'prod' }
+     properties = @{ Application_Type = 'web'; WorkspaceResourceId = $wsResId; IngestionMode = 'LogAnalytics'; DisableLocalAuth = $true }
+   } | ConvertTo-Json -Depth 3 | Set-Content "$env:TEMP\appi.json"
+   az resource create --resource-group $rg --name $appi --resource-type Microsoft.Insights/components --is-full-object --properties "@$env:TEMP\appi.json" --query "properties.provisioningState" -o tsv
+   $appiRes = az resource show -g $rg -n $appi --resource-type Microsoft.Insights/components -o json | ConvertFrom-Json
+   $appiRes.properties | Select-Object DisableLocalAuth, IngestionMode, WorkspaceResourceId | Format-List
+   ```
+3. The role, scoped to the resource:
+   ```powershell
+   az role assignment create --assignee-object-id $api.principalId --assignee-principal-type ServicePrincipal --role "Monitoring Metrics Publisher" --scope $appiRes.id
+   az role assignment list --scope $appiRes.id --query "[].{role:roleDefinitionName, principal:principalId}" -o table
+   ```
+4. Wait for any deploy in progress to finish (`gh run list --branch main --limit 1`): changing the app while the deploy job changes it would race.
+5. Turn telemetry on: two environment variables, so a new revision. The connection string isn't a secret: it says where to send, and with local auth off it can't be used to send anything. Without `AZURE_CLIENT_ID` the app refuses to start.
+   ```powershell
+   $cs = $appiRes.properties.ConnectionString
+   az containerapp update -n ca-todo-api -g $rg --set-env-vars "APPLICATIONINSIGHTS_CONNECTION_STRING=$cs" "AZURE_CLIENT_ID=$($api.clientId)" --query "properties.latestRevisionName" -o tsv
+   az containerapp revision list -n ca-todo-api -g $rg --query "[].{name:name, active:properties.active, health:properties.healthState, traffic:properties.trafficWeight}" -o table
+   ```
+   CI's deploys (`az containerapp update --image`) keep the variables.
+6. Check: use the app, then query. The first rows took a few minutes. Rows arriving at all proves the managed identity sign-in, since local auth is off. The same rows have two sets of names:
+
+   | Where | Tables | Columns |
+   | --- | --- | --- |
+   | `appi-todo-prod` → Logs | `requests`, `dependencies`, `traces`, `exceptions` (the classic names) | `timestamp`, `name`, `resultCode`, `duration`, `client_City`, `operation_Id` |
+   | `log-todo-prod` → Logs | `AppRequests`, `AppDependencies`, `AppTraces`, `AppExceptions` | `TimeGenerated`, `Name`, `ResultCode`, `DurationMs`, `ClientCity`, `OperationId` |
+
+   ```kusto
+   requests
+   | where timestamp > ago(30m)
+   | project timestamp, name, resultCode, duration, client_City, operation_Id
+   | order by timestamp desc
+   ```
+   No rows for `/alive` (filtered in the app).
+
+**The client-IP check (2026-11-08).** The first rows all said Des Moines (`centralus`) and `http://`, from Florida over HTTPS. The ASP.NET Core instrumentation records the scheme when the request's span starts, before `UseForwardedHeaders` runs, and records no client address for HTTP requests at all (only for gRPC), so ingestion located the address the telemetry was uploaded from: the container's. The app now records `url.scheme` and `client.address` when the span stops, after the middleware (`EnrichWithHttpResponse`). Ingestion still masks the address (`client_IP` is `0.0.0.0`) and keeps only the location derived from it. A city in Florida means the app saw my IP: the ingress appends it as the rightmost `X-Forwarded-For` entry, as PR #13 assumed.
