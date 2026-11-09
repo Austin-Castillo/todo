@@ -11,8 +11,13 @@ public static class Telemetry
     // Set only on the Container App. Without it (dotnet run, Compose, CI, the tests) telemetry stays off.
     public const string ConnectionStringKey = "APPLICATIONINSIGHTS_CONNECTION_STRING";
 
-    // The client ID of the managed identity that signs in to Application Insights (id-todo-app).
+    // The client ID of the managed identity that signs in to Application Insights (id-todo-api).
     public const string ClientIdKey = "AZURE_CLIENT_ID";
+
+    // OpenTelemetry semantic convention attributes, which the Azure Monitor exporter maps to the request's URL
+    // and to the location IP.
+    public const string SchemeTag = "url.scheme";
+    public const string ClientAddressTag = "client.address";
 
     public static WebApplicationBuilder AddTodoTelemetry(this WebApplicationBuilder builder)
     {
@@ -45,9 +50,25 @@ public static class Telemetry
             options.TracesPerSecond = null;
         });
 
-        // The probes call /alive every few seconds while a replica runs: no request rows for them.
         builder.Services.Configure<AspNetCoreTraceInstrumentationOptions>(options =>
-            options.Filter = context => !HealthEndpoints.IsHealthRequest(context.Request.Path));
+        {
+            // The probes call /alive every few seconds while a replica runs: no request rows for them.
+            options.Filter = context => !HealthEndpoints.IsHealthRequest(context.Request.Path);
+
+            // The request span records the scheme when it starts, before UseForwardedHeaders has run, so it saw
+            // the ingress's plain HTTP; and it records no client address for HTTP requests (only for gRPC). When
+            // the span stops, the middleware has run: record the browser's scheme and address. Application
+            // Insights turns the address into a location and then masks it (stores 0.0.0.0).
+            options.EnrichWithHttpResponse = (activity, response) =>
+            {
+                var context = response.HttpContext;
+                activity.SetTag(SchemeTag, context.Request.Scheme);
+                if (context.Connection.RemoteIpAddress is { } address)
+                {
+                    activity.SetTag(ClientAddressTag, address.ToString());
+                }
+            };
+        });
 
         return builder;
     }

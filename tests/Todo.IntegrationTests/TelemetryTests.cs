@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Net;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using OpenTelemetry;
@@ -48,19 +50,9 @@ public class TelemetryTests(TodoApiFixture fixture)
     [Fact]
     public async Task Telemetry_WhenOn_TracesARequestWithItsSqlCalls_ButNotTheProbe()
     {
-        // Arrange: the real configuration, plus an in-memory exporter to read what would be sent.
+        // Arrange
         var exported = new List<Activity>();
-        var server = fixture.CreateServer(host =>
-        {
-            host.UseSetting(Telemetry.ConnectionStringKey, FakeConnectionString);
-            host.UseSetting(Telemetry.ClientIdKey, FakeClientId);
-            host.ConfigureTestServices(services =>
-            {
-                services.Configure<AzureMonitorOptions>(options => options.DisableOfflineStorage = true);
-                services.ConfigureOpenTelemetryTracerProvider(tracing => tracing.AddInMemoryExporter(exported));
-            });
-        });
-        var client = server.CreateClient();
+        var client = CreateServerWithTelemetry(exported).CreateClient();
 
         // Every test server in this process reports to the same listeners, so each request carries its own trace
         // ID in a W3C traceparent header, as an upstream caller would, and the assertions look only at those.
@@ -79,6 +71,47 @@ public class TelemetryTests(TodoApiFixture fixture)
 
         Assert.DoesNotContain(Snapshot(exported), span => span.TraceId == probeTrace);
     }
+
+    // The span starts before UseForwardedHeaders runs, so without the enrichment it would record the ingress's
+    // plain HTTP and no client address. Sent as the ingress forwards a browser's HTTPS request.
+    [Fact]
+    public async Task Telemetry_WhenOn_RecordsTheForwardedSchemeAndClientAddress()
+    {
+        // Arrange
+        var exported = new List<Activity>();
+        var server = CreateServerWithTelemetry(exported);
+        var trace = ActivityTraceId.CreateRandom();
+
+        // Act
+        await server.SendAsync(context =>
+        {
+            context.Request.Method = HttpMethods.Get;
+            context.Request.Path = $"/api/lists/{MissingId}";
+            context.Connection.RemoteIpAddress = IPAddress.Parse("100.100.0.5");
+            context.Request.Headers["X-Forwarded-Proto"] = "https";
+            context.Request.Headers["X-Forwarded-For"] = "198.51.100.1, 203.0.113.7";
+            context.Request.Headers["traceparent"] = $"00-{trace}-{ActivitySpanId.CreateRandom()}-01";
+        }, Ct);
+        var spans = await WaitForSpans(exported, trace, span => span.Kind == ActivityKind.Server);
+
+        // Assert: the browser's scheme, and the address the ingress appended (the rightmost entry).
+        var request = Assert.Single(spans, span => span.Kind == ActivityKind.Server);
+        Assert.Equal("https", request.GetTagItem(Telemetry.SchemeTag));
+        Assert.Equal("203.0.113.7", request.GetTagItem(Telemetry.ClientAddressTag));
+    }
+
+    // The real configuration, plus an in-memory exporter to read what would be sent.
+    private TestServer CreateServerWithTelemetry(List<Activity> exported) =>
+        fixture.CreateServer(host =>
+        {
+            host.UseSetting(Telemetry.ConnectionStringKey, FakeConnectionString);
+            host.UseSetting(Telemetry.ClientIdKey, FakeClientId);
+            host.ConfigureTestServices(services =>
+            {
+                services.Configure<AzureMonitorOptions>(options => options.DisableOfflineStorage = true);
+                services.ConfigureOpenTelemetryTracerProvider(tracing => tracing.AddInMemoryExporter(exported));
+            });
+        });
 
     private static async Task SendWithTrace(HttpClient client, string path, ActivityTraceId traceId)
     {
