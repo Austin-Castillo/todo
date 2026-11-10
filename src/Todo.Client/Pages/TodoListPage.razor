@@ -51,39 +51,48 @@ else
             <p class="error">@error</p>
         }
 
+        @{
+            // Items still to do stay in the order they were added; done ones move to Completed, most recent first.
+            var toDo = CurrentList.Items.Where(i => !i.IsComplete).ToList();
+            var completed = CurrentList.Items
+                .Where(i => i.IsComplete)
+                .OrderByDescending(i => i.CompletedAt)
+                .ThenByDescending(i => i.Id)
+                .ToList();
+        }
+
         @if (CurrentList.Items.Count == 0)
         {
             <p>No items yet.</p>
         }
+        else if (toDo.Count == 0)
+        {
+            <p>All done.</p>
+        }
         else
         {
             <ul class="rows">
-                @foreach (var item in CurrentList.Items)
+                @foreach (var item in toDo)
                 {
-                    <li>
-                        @if (editingId == item.Id)
-                        {
-                            <form @onsubmit="() => SaveContent(item)">
-                                <input @bind="contentDraft" @bind:event="oninput" maxlength="@TodoLimits.ItemContentMaxLength"
-                                       aria-label="Item text" />
-                                <button type="submit" disabled="@(string.IsNullOrWhiteSpace(contentDraft) || saving)">Save</button>
-                                <button type="button" @onclick="() => editingId = null">Cancel</button>
-                            </form>
-                        }
-                        else
-                        {
-                            <label class="@(item.IsComplete ? "done" : null)">
-                                <input type="checkbox" checked="@item.IsComplete" @onchange="() => Toggle(item)" disabled="@saving" />
-                                @item.Content
-                            </label>
-                            <span>
-                                <button @onclick="() => StartEdit(item)">Edit</button>
-                                <button @onclick="() => DeleteItem(item)" disabled="@saving">Delete</button>
-                            </span>
-                        }
-                    </li>
+                    @ItemRow(item)
                 }
             </ul>
+        }
+
+        @if (completed.Count > 0)
+        {
+            @* A native disclosure: starts open, and the browser keeps whether it's open, so the component has no
+               state to keep. Re-renders don't reopen it: "open" never changes in the render tree, so the diff
+               leaves the attribute alone. *@
+            <details class="completed" open>
+                <summary>Completed (@completed.Count)</summary>
+                <ul class="rows">
+                    @foreach (var item in completed)
+                    {
+                        @ItemRow(item)
+                    }
+                </ul>
+            </details>
         }
     </fieldset>
 }
@@ -98,6 +107,31 @@ else
 
     private bool saving;
     private string? error;
+
+    // One row, shared by the to-do list and the Completed section.
+    private RenderFragment ItemRow(TodoItemDto item) =>
+        @<li @key="item.Id">
+            @if (editingId == item.Id)
+            {
+                <form @onsubmit="() => SaveContent(item)">
+                    <input @bind="contentDraft" @bind:event="oninput" maxlength="@TodoLimits.ItemContentMaxLength"
+                           aria-label="Item text" />
+                    <button type="submit" disabled="@(string.IsNullOrWhiteSpace(contentDraft) || saving)">Save</button>
+                    <button type="button" @onclick="() => editingId = null">Cancel</button>
+                </form>
+            }
+            else
+            {
+                <label class="@(item.IsComplete ? "done" : null)">
+                    <input type="checkbox" checked="@item.IsComplete" @onchange="() => Toggle(item)" disabled="@saving" />
+                    @item.Content
+                </label>
+                <span>
+                    <button @onclick="() => StartEdit(item)">Edit</button>
+                    <button @onclick="() => DeleteItem(item)" disabled="@saving">Delete</button>
+                </span>
+            }
+        </li>;
 
     private string newItemContent = "";
     private bool renaming;

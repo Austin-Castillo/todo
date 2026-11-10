@@ -41,6 +41,12 @@ form, .heading {
             flex: 1;
         }
 
+.completed summary {
+    margin-top: 1rem;
+    cursor: pointer;
+    color: #666;
+}
+
 .muted, .done {
     color: #666;
 }

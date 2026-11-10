@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -113,8 +114,9 @@ public class TodoItemEndpointsTests(TodoApiFixture fixture)
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
-        var fetched = await _client.GetFromJsonAsync<TodoItemDto>($"/api/items/{item.Id}", Ct);
-        Assert.Equal(new TodoItemDto(item.Id, list.Id, "Oat milk", IsComplete: true), fetched);
+        var fetched = await _client.GetItemAsync(item.Id, Ct);
+        Assert.Equal((item.Id, list.Id, "Oat milk", true), (fetched.Id, fetched.TodoListId, fetched.Content, fetched.IsComplete));
+        Assert.NotNull(fetched.CompletedAt);
     }
 
     // PUT replaces the whole item, so a field left out of the body isn't "unchanged": it gets its default.
@@ -137,24 +139,23 @@ public class TodoItemEndpointsTests(TodoApiFixture fixture)
         Assert.False(fetched?.IsComplete);
     }
 
-    // CompletedAt isn't in the API yet (the code still reads IsComplete), so these check the database directly.
-
     [Fact]
     public async Task UpdateItem_MarkingDone_RecordsWhenItWasDone()
     {
         // Arrange
         var list = await _client.CreateListAsync("Groceries", Ct);
         var item = await _client.CreateItemAsync(list.Id, "Milk", Ct);
-        Assert.Null(await CompletedAtInDatabaseAsync(item.Id));
+        Assert.Null(item.CompletedAt);
         var before = DateTime.UtcNow;
 
         // Act
         await _client.UpdateItemAsync(item.Id, new UpdateTodoItemRequest("Milk", IsComplete: true), Ct);
 
         // Assert
-        var completedAt = await CompletedAtInDatabaseAsync(item.Id);
-        Assert.NotNull(completedAt);
-        Assert.InRange(completedAt.Value, before, DateTime.UtcNow);
+        var fetched = await _client.GetItemAsync(item.Id, Ct);
+        Assert.True(fetched.IsComplete);
+        Assert.NotNull(fetched.CompletedAt);
+        Assert.InRange(fetched.CompletedAt.Value, before, DateTime.UtcNow);
     }
 
     [Fact]
@@ -164,14 +165,14 @@ public class TodoItemEndpointsTests(TodoApiFixture fixture)
         var list = await _client.CreateListAsync("Groceries", Ct);
         var item = await _client.CreateItemAsync(list.Id, "Milk", Ct);
         await _client.UpdateItemAsync(item.Id, new UpdateTodoItemRequest("Milk", IsComplete: true), Ct);
-        var completedAt = await CompletedAtInDatabaseAsync(item.Id);
+        var completedAt = (await _client.GetItemAsync(item.Id, Ct)).CompletedAt;
 
         // Act
         await _client.UpdateItemAsync(item.Id, new UpdateTodoItemRequest("Oat milk", IsComplete: true), Ct);
 
         // Assert
         Assert.NotNull(completedAt);
-        Assert.Equal(completedAt, await CompletedAtInDatabaseAsync(item.Id));
+        Assert.Equal(completedAt, (await _client.GetItemAsync(item.Id, Ct)).CompletedAt);
     }
 
     [Fact]
@@ -186,14 +187,66 @@ public class TodoItemEndpointsTests(TodoApiFixture fixture)
         await _client.UpdateItemAsync(item.Id, new UpdateTodoItemRequest("Milk", IsComplete: false), Ct);
 
         // Assert
-        Assert.Null(await CompletedAtInDatabaseAsync(item.Id));
+        var fetched = await _client.GetItemAsync(item.Id, Ct);
+        Assert.False(fetched.IsComplete);
+        Assert.Null(fetched.CompletedAt);
     }
 
-    private async Task<DateTime?> CompletedAtInDatabaseAsync(int itemId)
+    [Fact]
+    public async Task GetItem_SendsCompletedAtAsUtc()
+    {
+        // Arrange
+        var list = await _client.CreateListAsync("Groceries", Ct);
+        var item = await _client.CreateItemAsync(list.Id, "Milk", Ct);
+        await _client.UpdateItemAsync(item.Id, new UpdateTodoItemRequest("Milk", IsComplete: true), Ct);
+
+        // Act
+        var json = await _client.GetFromJsonAsync<JsonElement>($"/api/items/{item.Id}", Ct);
+
+        // Assert: ISO 8601 with a "Z", so any client reads it as UTC rather than its own local time.
+        Assert.EndsWith("Z", json.GetProperty("completedAt").GetString());
+    }
+
+    // The switch to reading CompletedAt: rows where the two columns disagree (written by an older release during
+    // a deploy or a rollback, before the second backfill) follow CompletedAt. Arranged in the database, because
+    // the API can no longer produce such a row.
+
+    [Fact]
+    public async Task GetItem_WhenOnlyIsCompleteSaysDone_ReturnsNotDone()
+    {
+        // Arrange
+        var list = await _client.CreateListAsync("Groceries", Ct);
+        var item = await _client.CreateItemAsync(list.Id, "Milk", Ct);
+        await SetIsCompleteInDatabaseAsync(item.Id, true);
+
+        // Act
+        var fetched = await _client.GetItemAsync(item.Id, Ct);
+
+        // Assert
+        Assert.False(fetched.IsComplete);
+    }
+
+    [Fact]
+    public async Task UpdateItem_MarkingDone_WhenOnlyIsCompleteSaysDone_RecordsWhenItWasDone()
+    {
+        // Arrange
+        var list = await _client.CreateListAsync("Groceries", Ct);
+        var item = await _client.CreateItemAsync(list.Id, "Milk", Ct);
+        await SetIsCompleteInDatabaseAsync(item.Id, true);
+
+        // Act
+        await _client.UpdateItemAsync(item.Id, new UpdateTodoItemRequest("Milk", IsComplete: true), Ct);
+
+        // Assert
+        Assert.NotNull((await _client.GetItemAsync(item.Id, Ct)).CompletedAt);
+    }
+
+    private async Task SetIsCompleteInDatabaseAsync(int itemId, bool isComplete)
     {
         using var scope = fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<TodoDbContext>();
-        return await db.TodoItems.Where(i => i.Id == itemId).Select(i => i.CompletedAt).SingleAsync(Ct);
+        await db.TodoItems.Where(i => i.Id == itemId)
+            .ExecuteUpdateAsync(s => s.SetProperty(i => i.IsComplete, isComplete), Ct);
     }
 
     [Fact]

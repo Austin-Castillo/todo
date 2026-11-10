@@ -31,6 +31,10 @@ internal static class ApiTestHelpers
             ?? throw new InvalidOperationException("The response had no body.");
     }
 
+    public static async Task<TodoItemDto> GetItemAsync(this HttpClient client, int id, CancellationToken ct) =>
+        await client.GetFromJsonAsync<TodoItemDto>($"/api/items/{id}", ct)
+            ?? throw new InvalidOperationException("The response had no body.");
+
     public static async Task UpdateItemAsync(
         this HttpClient client, int id, UpdateTodoItemRequest request, CancellationToken ct)
     {
