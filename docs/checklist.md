@@ -390,3 +390,31 @@ The CLI has no probe flags, so: read the app's template (the part of the app tha
    ```
    Probe failures and restarts appear in the platform's own log, `ContainerAppSystemLogs_CL`.
 6. After the next deploy, check that CI's `az containerapp update --image` kept the probes (step 4's first command on the new revision).
+
+### G. Changing the schema of a live database
+
+_Started 2026-11-09: `TodoItem.IsComplete` replaced by `CompletedAt` (when the item was done), so that done items can move to a "Completed" section, most recent first._
+
+Every deploy runs the migration first, while the previous release still serves, then swaps the image (E2). So each migration must work with the code before it, and each release must cope with what the previous one wrote while both were running. A change that reshapes or removes something existing code uses therefore takes several releases (expand and contract, ADR-0004):
+
+The steps are expand (add the new column and start writing it), backfill, switch reads, stop writing the old column, contract (drop it). Two steps can share a release only if the release before still works with the result, and so does any release you might roll back to:
+
+| Release | Migration (runs while the previous release still serves) | Writes | Reads |
+| --- | --- | --- | --- |
+| R1 expand | Add `CompletedAt` (nullable), backfill it from `IsComplete` | Both | `IsComplete` |
+| R2 switch | Backfill again, both ways: rows R0 checked or unchecked after R1's migration | Both | `CompletedAt` |
+| R3 stop | Give `IsComplete` a default, so inserts that leave it out still work | `CompletedAt` (`IsComplete` unmapped) | `CompletedAt` |
+| R4 contract | Drop `IsComplete` | `CompletedAt` | `CompletedAt` |
+
+Most releases change nothing a user can see; only R2 ships the feature.
+
+**Can I roll back right now?** A rollback swaps only the server's image: the schema and data stay, and migrations never run again when rolling forward (`__EFMigrationsHistory`). So the older code must work with the current schema, and what it writes meanwhile must leave data the newer release can read.
+
+| From | To the release before | Two or more back |
+| --- | --- | --- |
+| R1 | R0: safe. R0 leaves `CompletedAt` stale for rows it toggles; R2's backfill fixes them | (none) |
+| R2 | R1: safe, nothing goes stale (R1 writes both). The rehearsal | R0: works, but after rolling forward R2 reads `CompletedAt` that R0 left stale, and its backfill has already run: needs a new migration |
+| R3 | R2: safe. `IsComplete` is stale for rows R3 toggled, but R2 doesn't read it | R1: items R3 checked show as not done (R1 reads `IsComplete`) |
+| R4 | R3: same code, so a no-op | R2 or earlier: every item query fails (they map the dropped column). Fix forward instead: re-add the column and fill it from `CompletedAt IS NOT NULL` |
+
+A bad migration (a wrong backfill, say) isn't undone by any rollback: fix forward with a new migration (ADR-0004).

@@ -1,6 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Todo.Api.Data;
 using Todo.Contracts;
 using static Todo.IntegrationTests.ApiTestHelpers;
 
@@ -132,6 +135,65 @@ public class TodoItemEndpointsTests(TodoApiFixture fixture)
 
         var fetched = await _client.GetFromJsonAsync<TodoItemDto>($"/api/items/{item.Id}", Ct);
         Assert.False(fetched?.IsComplete);
+    }
+
+    // CompletedAt isn't in the API yet (the code still reads IsComplete), so these check the database directly.
+
+    [Fact]
+    public async Task UpdateItem_MarkingDone_RecordsWhenItWasDone()
+    {
+        // Arrange
+        var list = await _client.CreateListAsync("Groceries", Ct);
+        var item = await _client.CreateItemAsync(list.Id, "Milk", Ct);
+        Assert.Null(await CompletedAtInDatabaseAsync(item.Id));
+        var before = DateTime.UtcNow;
+
+        // Act
+        await _client.UpdateItemAsync(item.Id, new UpdateTodoItemRequest("Milk", IsComplete: true), Ct);
+
+        // Assert
+        var completedAt = await CompletedAtInDatabaseAsync(item.Id);
+        Assert.NotNull(completedAt);
+        Assert.InRange(completedAt.Value, before, DateTime.UtcNow);
+    }
+
+    [Fact]
+    public async Task UpdateItem_EditingADoneItem_KeepsWhenItWasDone()
+    {
+        // Arrange
+        var list = await _client.CreateListAsync("Groceries", Ct);
+        var item = await _client.CreateItemAsync(list.Id, "Milk", Ct);
+        await _client.UpdateItemAsync(item.Id, new UpdateTodoItemRequest("Milk", IsComplete: true), Ct);
+        var completedAt = await CompletedAtInDatabaseAsync(item.Id);
+
+        // Act
+        await _client.UpdateItemAsync(item.Id, new UpdateTodoItemRequest("Oat milk", IsComplete: true), Ct);
+
+        // Assert
+        Assert.NotNull(completedAt);
+        Assert.Equal(completedAt, await CompletedAtInDatabaseAsync(item.Id));
+    }
+
+    [Fact]
+    public async Task UpdateItem_MarkingNotDone_ClearsWhenItWasDone()
+    {
+        // Arrange
+        var list = await _client.CreateListAsync("Groceries", Ct);
+        var item = await _client.CreateItemAsync(list.Id, "Milk", Ct);
+        await _client.UpdateItemAsync(item.Id, new UpdateTodoItemRequest("Milk", IsComplete: true), Ct);
+
+        // Act
+        await _client.UpdateItemAsync(item.Id, new UpdateTodoItemRequest("Milk", IsComplete: false), Ct);
+
+        // Assert
+        Assert.Null(await CompletedAtInDatabaseAsync(item.Id));
+    }
+
+    private async Task<DateTime?> CompletedAtInDatabaseAsync(int itemId)
+    {
+        using var scope = fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<TodoDbContext>();
+        return await db.TodoItems.Where(i => i.Id == itemId).Select(i => i.CompletedAt).SingleAsync(Ct);
     }
 
     [Fact]

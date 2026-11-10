@@ -100,6 +100,13 @@ public sealed class ServerTodoService(TodoDbContext db) : ITodoService
             return false;
         }
 
+        // CompletedAt changes only when the item is checked or unchecked, so editing a done item's text keeps
+        // the time it was done.
+        if (request.IsComplete != item.IsComplete)
+        {
+            item.CompletedAt = request.IsComplete ? DateTime.UtcNow : null;
+        }
+
         item.Content = request.Content;
         item.IsComplete = request.IsComplete;
         await db.SaveChangesAsync(ct);
