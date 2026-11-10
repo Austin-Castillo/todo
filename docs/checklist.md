@@ -418,3 +418,7 @@ Most releases change nothing a user can see; only R2 ships the feature.
 | R4 | R3: same code, so a no-op | R2 or earlier: every item query fails (they map the dropped column). Fix forward instead: re-add the column and fill it from `CompletedAt IS NOT NULL` |
 
 A bad migration (a wrong backfill, say) isn't undone by any rollback: fix forward with a new migration (ADR-0004).
+
+What happened at each release:
+- **R1** (PR #20, 2026-11-09): deployed with no manual steps. Production had 10 items; the 3 done ones got a `CompletedAt`, the 7 others `NULL`. Nothing was toggled during the window, so R2's backfill has nothing to fix there.
+- **R2**: reads switch to `CompletedAt`, including the "was it done?" check when an item is updated (reading `IsComplete` there would still be a read). The API adds `completedAt` and keeps `isComplete` (now `completedAt != null`), so a browser still running the previous client works through the deploy. `datetime2` has no time zone, so EF reads it back as `DateTimeKind.Unspecified` and JSON would leave off the `Z`: a value converter marks it UTC, with no schema change. The second backfill was tried on my dev database first, against two rows made to disagree by hand, one each way (target rows by `Id`: two `UPDATE TOP (1)`s can hit the same row and cancel out): it fixed both and left the rest alone.

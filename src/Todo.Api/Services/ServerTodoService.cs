@@ -10,6 +10,7 @@ public sealed class ServerTodoService(TodoDbContext db) : ITodoService
 {
     // Reads project straight into DTOs: EF selects only the columns the DTO needs, computes the counts
     // in SQL, and tracks nothing (only entities are tracked), so AsNoTracking() isn't needed.
+    // "Done" is read from CompletedAt alone; IsComplete is still written but no longer read (docs/checklist.md, G).
 
     public Task<List<TodoListSummary>> GetListsAsync(CancellationToken ct = default) =>
         db.TodoLists
@@ -18,7 +19,7 @@ public sealed class ServerTodoService(TodoDbContext db) : ITodoService
                 l.Id,
                 l.Name,
                 l.Items.Count,
-                l.Items.Count(i => i.IsComplete)))
+                l.Items.Count(i => i.CompletedAt != null)))
             .ToListAsync(ct);
 
     public Task<TodoListDetails?> GetListAsync(int id, CancellationToken ct = default) =>
@@ -29,14 +30,14 @@ public sealed class ServerTodoService(TodoDbContext db) : ITodoService
                 l.Name,
                 l.Items
                     .OrderBy(i => i.Id)
-                    .Select(i => new TodoItemDto(i.Id, i.TodoListId, i.Content, i.IsComplete))
+                    .Select(i => new TodoItemDto(i.Id, i.TodoListId, i.Content, i.CompletedAt != null, i.CompletedAt))
                     .ToList()))
             .FirstOrDefaultAsync(ct);
 
     public Task<TodoItemDto?> GetItemAsync(int id, CancellationToken ct = default) =>
         db.TodoItems
             .Where(i => i.Id == id)
-            .Select(i => new TodoItemDto(i.Id, i.TodoListId, i.Content, i.IsComplete))
+            .Select(i => new TodoItemDto(i.Id, i.TodoListId, i.Content, i.CompletedAt != null, i.CompletedAt))
             .FirstOrDefaultAsync(ct);
 
     // Writes: creates and updates go through the change tracker; deletes are single set-based statements,
@@ -86,7 +87,7 @@ public sealed class ServerTodoService(TodoDbContext db) : ITodoService
         db.TodoItems.Add(item);
         await db.SaveChangesAsync(ct);
 
-        return new TodoItemDto(item.Id, item.TodoListId, item.Content, item.IsComplete);
+        return new TodoItemDto(item.Id, item.TodoListId, item.Content, item.CompletedAt != null, item.CompletedAt);
     }
 
     // Replaces the whole item, so one method covers every edit, including marking it done.
@@ -101,8 +102,9 @@ public sealed class ServerTodoService(TodoDbContext db) : ITodoService
         }
 
         // CompletedAt changes only when the item is checked or unchecked, so editing a done item's text keeps
-        // the time it was done.
-        if (request.IsComplete != item.IsComplete)
+        // the time it was done. Whether it was done comes from CompletedAt too: IsComplete is written, never read.
+        var wasComplete = item.CompletedAt != null;
+        if (request.IsComplete != wasComplete)
         {
             item.CompletedAt = request.IsComplete ? DateTime.UtcNow : null;
         }
