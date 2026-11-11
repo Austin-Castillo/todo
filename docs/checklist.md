@@ -291,6 +291,38 @@ gh run rerun <run id> --failed
 ```
 `azure/login` prints the token's subject ("Federated token details") before it tries to sign in: compare it with the credential when sign-in fails.
 
+#### E3. Rolling back
+
+_Rehearsed 2026-11-10 (G). No cost._
+
+A rollback points the server at an earlier image. The schema and the data stay as they are, and migrations never run again (`__EFMigrationsHistory`), so roll back only to a release that works with the current schema: normally the one just before (the table in G shows why). A bad migration isn't undone by a rollback: fix forward with a new migration.
+
+Two ways, normally both:
+- **Fast, by hand:** update the server's image to an earlier SHA tag (below). Minutes. Production then differs from `main`, and the next merge deploys `main` again, bad change included, so this is a stopgap.
+- **Lasting, through Git:** `git revert` the bad commit in a pull request. CI tests and deploys it, and `main` matches production again.
+
+`az containerapp update --image` makes a new revision from the current template with only the image changed, so the probes, variables and resources stay. Reactivating an old revision would instead bring back that revision's whole template. The migration job isn't involved: it keeps the newer image until the next deploy.
+
+1. Variables (local only): the server, and the commit to go back to (`git log --oneline` on `main`):
+   ```powershell
+   $rg = 'rg-todo-prod'; $app = 'ca-todo-api'; $acr = 'crtodoac1.azurecr.io'
+   $sha = '<full commit SHA>'
+   ```
+2. Check the image exists, and note what's running now (read-only):
+   ```powershell
+   az acr repository show-tags --name crtodoac1 --repository todo-api -o tsv | Select-String $sha
+   az containerapp revision list -n $app -g $rg --query "[].{revision:name, image:properties.template.containers[0].image, health:properties.healthState, traffic:properties.trafficWeight}" -o table
+   ```
+3. Roll back (changes Azure):
+   ```powershell
+   az containerapp update -n $app -g $rg --image "$acr/todo-api:$sha" --output none
+   ```
+4. Repeat the revision list until the new revision is `Healthy` with 100% traffic (about a minute; `None` at first). Check the template kept everything:
+   ```powershell
+   az containerapp show -n $app -g $rg --query "{image:properties.template.containers[0].image, env:properties.template.containers[0].env[].name, probes:properties.template.containers[0].probes[].type}" -o json
+   ```
+5. Open a revert pull request for the bad commit, or roll forward the same way with the newer SHA. Don't merge anything else while production differs from `main`.
+
 ### F. Observability
 
 #### F1. Application Insights
@@ -421,4 +453,6 @@ A bad migration (a wrong backfill, say) isn't undone by any rollback: fix forwar
 
 What happened at each release:
 - **R1** (PR #20, 2026-11-09): deployed with no manual steps. Production had 10 items; the 3 done ones got a `CompletedAt`, the 7 others `NULL`. Nothing was toggled during the window, so R2's backfill has nothing to fix there.
-- **R2**: reads switch to `CompletedAt`, including the "was it done?" check when an item is updated (reading `IsComplete` there would still be a read). The API adds `completedAt` and keeps `isComplete` (now `completedAt != null`), so a browser still running the previous client works through the deploy. `datetime2` has no time zone, so EF reads it back as `DateTimeKind.Unspecified` and JSON would leave off the `Z`: a value converter marks it UTC, with no schema change. The second backfill was tried on my dev database first, against two rows made to disagree by hand, one each way (target rows by `Id`: two `UPDATE TOP (1)`s can hit the same row and cancel out): it fixed both and left the rest alone.
+- **R2** (PR #21, 2026-11-10): reads switch to `CompletedAt`, including the "was it done?" check when an item is updated (reading `IsComplete` there would still be a read). The API adds `completedAt` and keeps `isComplete` (now `completedAt != null`), so a browser still running the previous client works through the deploy. `datetime2` has no time zone, so EF reads it back as `DateTimeKind.Unspecified` and JSON would leave off the `Z`: a value converter marks it UTC, with no schema change. The second backfill was tried on my dev database first, against two rows made to disagree by hand, one each way (target rows by `Id`: two `UPDATE TOP (1)`s can hit the same row and cancel out): it fixed both and left the rest alone. Production after the deploy: no row where the columns disagree.
+- **Rollback rehearsal, R2 to R1 and back** (2026-11-10, E3): R1's page had no Completed section and no errors; an item checked on R1 got both `IsComplete` and a `CompletedAt`, so no row disagreed; after rolling forward it was at the top of Completed. Each update kept the probes and the variables.
+- **R3**: the code stops mapping `IsComplete`, and `migrations add` scaffolded a `DropColumn` for it (with EF's "may result in the loss of data" warning). Replaced by hand with a default constraint: the drop must wait a release, because the previous release still maps the column, and the default is what lets the new code's inserts, which leave the column out, through. Without it, every insert fails: `Cannot insert the value NULL into column 'IsComplete'` (15 tests failed that way when I took it out). The snapshot already says the column is gone, so the next release's migration comes out empty and the drop is written by hand.

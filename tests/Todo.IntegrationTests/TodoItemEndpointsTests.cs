@@ -2,9 +2,6 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Todo.Api.Data;
 using Todo.Contracts;
 using static Todo.IntegrationTests.ApiTestHelpers;
 
@@ -205,48 +202,6 @@ public class TodoItemEndpointsTests(TodoApiFixture fixture)
 
         // Assert: ISO 8601 with a "Z", so any client reads it as UTC rather than its own local time.
         Assert.EndsWith("Z", json.GetProperty("completedAt").GetString());
-    }
-
-    // The switch to reading CompletedAt: rows where the two columns disagree (written by an older release during
-    // a deploy or a rollback, before the second backfill) follow CompletedAt. Arranged in the database, because
-    // the API can no longer produce such a row.
-
-    [Fact]
-    public async Task GetItem_WhenOnlyIsCompleteSaysDone_ReturnsNotDone()
-    {
-        // Arrange
-        var list = await _client.CreateListAsync("Groceries", Ct);
-        var item = await _client.CreateItemAsync(list.Id, "Milk", Ct);
-        await SetIsCompleteInDatabaseAsync(item.Id, true);
-
-        // Act
-        var fetched = await _client.GetItemAsync(item.Id, Ct);
-
-        // Assert
-        Assert.False(fetched.IsComplete);
-    }
-
-    [Fact]
-    public async Task UpdateItem_MarkingDone_WhenOnlyIsCompleteSaysDone_RecordsWhenItWasDone()
-    {
-        // Arrange
-        var list = await _client.CreateListAsync("Groceries", Ct);
-        var item = await _client.CreateItemAsync(list.Id, "Milk", Ct);
-        await SetIsCompleteInDatabaseAsync(item.Id, true);
-
-        // Act
-        await _client.UpdateItemAsync(item.Id, new UpdateTodoItemRequest("Milk", IsComplete: true), Ct);
-
-        // Assert
-        Assert.NotNull((await _client.GetItemAsync(item.Id, Ct)).CompletedAt);
-    }
-
-    private async Task SetIsCompleteInDatabaseAsync(int itemId, bool isComplete)
-    {
-        using var scope = fixture.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TodoDbContext>();
-        await db.TodoItems.Where(i => i.Id == itemId)
-            .ExecuteUpdateAsync(s => s.SetProperty(i => i.IsComplete, isComplete), Ct);
     }
 
     [Fact]

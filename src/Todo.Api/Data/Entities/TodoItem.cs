@@ -6,10 +6,9 @@ public class TodoItem
 
     public required string Content { get; set; }
 
-    public bool IsComplete { get; set; }
-
-    // When the item was last marked done (UTC); null while it isn't done. Replacing IsComplete by expand and
-    // contract: for now the code writes both and reads only CompletedAt (docs/checklist.md, G).
+    // When the item was last marked done (UTC); null while it isn't done. It replaced an IsComplete column by
+    // expand and contract (docs/checklist.md, G). That column is no longer mapped but still in the database,
+    // with a default for the rows this code inserts, until the next release drops it.
     public DateTime? CompletedAt { get; set; }
 
     public int TodoListId { get; set; }

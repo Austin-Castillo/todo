@@ -10,7 +10,7 @@ public sealed class ServerTodoService(TodoDbContext db) : ITodoService
 {
     // Reads project straight into DTOs: EF selects only the columns the DTO needs, computes the counts
     // in SQL, and tracks nothing (only entities are tracked), so AsNoTracking() isn't needed.
-    // "Done" is read from CompletedAt alone; IsComplete is still written but no longer read (docs/checklist.md, G).
+    // "Done" means CompletedAt has a value; the API's isComplete is computed from it.
 
     public Task<List<TodoListSummary>> GetListsAsync(CancellationToken ct = default) =>
         db.TodoLists
@@ -102,7 +102,7 @@ public sealed class ServerTodoService(TodoDbContext db) : ITodoService
         }
 
         // CompletedAt changes only when the item is checked or unchecked, so editing a done item's text keeps
-        // the time it was done. Whether it was done comes from CompletedAt too: IsComplete is written, never read.
+        // the time it was done.
         var wasComplete = item.CompletedAt != null;
         if (request.IsComplete != wasComplete)
         {
@@ -110,7 +110,6 @@ public sealed class ServerTodoService(TodoDbContext db) : ITodoService
         }
 
         item.Content = request.Content;
-        item.IsComplete = request.IsComplete;
         await db.SaveChangesAsync(ct);
 
         return true;
