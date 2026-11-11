@@ -7,8 +7,7 @@ public class TodoItem
     public required string Content { get; set; }
 
     // When the item was last marked done (UTC); null while it isn't done. It replaced an IsComplete column by
-    // expand and contract (docs/checklist.md, G). That column is no longer mapped but still in the database,
-    // with a default for the rows this code inserts, until the next release drops it.
+    // expand and contract, over four releases (docs/checklist.md, G).
     public DateTime? CompletedAt { get; set; }
 
     public int TodoListId { get; set; }
