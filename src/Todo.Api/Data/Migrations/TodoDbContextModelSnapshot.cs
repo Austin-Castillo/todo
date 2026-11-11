@@ -38,9 +38,6 @@ namespace Todo.Api.Data.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
-                    b.Property<bool>("IsComplete")
-                        .HasColumnType("bit");
-
                     b.Property<int>("TodoListId")
                         .HasColumnType("int");
 
