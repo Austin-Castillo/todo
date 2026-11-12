@@ -1,15 +1,15 @@
 # Shipping checklist
 
-The whole path from code to a running app on Azure, step by step: every portal and CLI action and the settings chosen. Stage 1.2 repeats it with less help and turns it into Terraform.
+The whole path from code to a running app on Azure, step by step: every portal and CLI action and the settings chosen.
 
 ## Decisions
 
-- Region: `centralus`. Everything in one region. `eastus2` was the first choice (closest to Florida), but on 2026-11-02 both it and `eastus` refused new SQL servers for this Pay-As-You-Go subscription (`RegionDoesNotAllowProvisioning`). Create the SQL server first in a new region: it's the resource most likely to be refused.
+- Region: `centralus`. Everything in one region. `eastus2` was the first choice (closest to me), but on 2026-11-02 both it and `eastus` refused new SQL servers for this Pay-As-You-Go subscription (`RegionDoesNotAllowProvisioning`). Create the SQL server first in a new region: it's the resource most likely to be refused.
 - Network to Azure SQL: public endpoint, "Allow Azure services", Entra-only authentication (ADR-0006).
 - Identities: user-assigned, one per workload (`id-todo-api`, `id-todo-migrate`, `id-todo-deploy`), so they exist before the app and the job.
 - Deploys: GitHub Actions signs in as `id-todo-deploy` through an OIDC federated credential for `main` (no stored secret), pushes the smoke-tested images, runs the migration job with the new image, then updates the server (ADR-0007).
 - Telemetry: the Azure Monitor OpenTelemetry Distro in the app, sending to a workspace-based Application Insights resource as `id-todo-api`, with local auth disabled; every trace kept, the health endpoints left out (ADR-0008). The probes call `/alive`, which never touches the database (ADR-0009).
-- Key Vault: not in Stage 0. With managed identities there's no secret to store. Planned for Stage 1.2, where sign-in cookies need the Data Protection key ring kept outside the container and encrypted with a Key Vault key.
+- Key Vault: not used. With managed identities there's no secret to store. It would be needed once the app has sign-in: its cookies need the Data Protection key ring kept outside the container and encrypted with a Key Vault key.
 - Creates run in the CLI (PowerShell); the portal is for looking.
 
 ## Names
@@ -39,7 +39,7 @@ _Filled in as each block is done._
 
 _Done 2026-10-31 to 11-02 (redone in `centralus` after the SQL refusal; a resource group's location can't change, so the group was deleted and recreated). Cost before: $0.07 for October. The registry (Basic) is the only fixed cost: about $0.17/day._
 
-1. Check the month's actual cost: portal → Cost Management → Cost analysis, scope `career-dev`.
+1. Check the month's actual cost: portal → Cost Management → Cost analysis, scoped to the subscription.
 2. Confirm the subscription: `az account show --query "{name:name, id:id}" -o table` (else `az account set --subscription <id>`).
 3. Make sure no default location is saved (`az config get defaults`; remove one with `az config unset defaults.location`), and pass `--location` on every create. A saved default beats the resource group's location: the first registry landed in `eastus` and was recreated.
 4. Register the resource providers, once per subscription (free):
@@ -207,7 +207,7 @@ Also seen: billed compute (the database's `app_cpu_billed` metric, 5-minute buck
    2. `http://<fqdn>` again: a 307 Internal Redirect. The browser rewrites to HTTPS itself; no request leaves.
    3. Create a list and an item, reload: the data comes from Azure SQL.
    4. From my phone with Wi-Fi off (another IP): 403 from the ingress.
-   5. The startup logs show the Data Protection warnings (keys stored inside the container, unencrypted): harmless while nothing validates protected data; Stage 1.2's sign-in needs the key ring outside the container, encrypted with Key Vault.
+   5. The startup logs show the Data Protection warnings (keys stored inside the container, unencrypted): harmless while nothing validates protected data; sign-in would need the key ring outside the container, encrypted with Key Vault.
       ```kusto
       ContainerAppConsoleLogs_CL
       | where ContainerAppName_s == "ca-todo-api"
@@ -378,7 +378,7 @@ The friendly `az monitor app-insights` commands are in a CLI extension; `az reso
    ```
    No rows for `/alive` (filtered in the app).
 
-**The client-IP check (2026-11-08).** The first rows all said Des Moines (`centralus`) and `http://`, from Florida over HTTPS. The ASP.NET Core instrumentation records the scheme when the request's span starts, before `UseForwardedHeaders` runs, and records no client address for HTTP requests at all (only for gRPC), so ingestion located the address the telemetry was uploaded from: the container's. The app now records `url.scheme` and `client.address` when the span stops, after the middleware (`EnrichWithHttpResponse`). Ingestion still masks the address (`client_IP` is `0.0.0.0`) and keeps only the location derived from it. A city in Florida means the app saw my IP: the ingress appends it as the rightmost `X-Forwarded-For` entry, as PR #13 assumed. Checked 2026-11-09 after PR #18 deployed: the new rows showed Florida, `https://` URLs and `client_IP` `0.0.0.0`.
+**The client-IP check (2026-11-08).** The first rows all said Des Moines (`centralus`) and `http://`, though I was browsing over HTTPS from much farther away. The ASP.NET Core instrumentation records the scheme when the request's span starts, before `UseForwardedHeaders` runs, and records no client address for HTTP requests at all (only for gRPC), so ingestion located the address the telemetry was uploaded from: the container's. The app now records `url.scheme` and `client.address` when the span stops, after the middleware (`EnrichWithHttpResponse`). Ingestion still masks the address (`client_IP` is `0.0.0.0`) and keeps only the location derived from it. A city near me means the app saw my IP: the ingress appends it as the rightmost `X-Forwarded-For` entry, as PR #13 assumed. Checked 2026-11-09 after PR #18 deployed: the new rows showed my own area, `https://` URLs and `client_IP` `0.0.0.0`.
 
 #### F2. Health probes
 
