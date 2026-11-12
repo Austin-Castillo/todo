@@ -10,7 +10,7 @@
 - The app and the bundle sign in with managed identities (no passwords anywhere). Entra-only authentication turns SQL logins off on the server, so the only way in is an Entra token for an identity that has a user in the database.
 - This app has no sign-in and stores nothing sensitive: the ingress is restricted to my IP because anyone could write to the home page, not because of the data.
 - The whole subscription has a $10/month budget. The registry is the only fixed cost (about $5/month); the database and Container Apps run inside free allowances.
-- Deploying to Azure already brings many new topics (Container Apps, Azure SQL, managed identity, OIDC deploys, Application Insights). The infrastructure is built by hand, in one environment.
+- Deploying to Azure already involves many moving parts (Container Apps, Azure SQL, managed identity, OIDC deploys, Application Insights). The infrastructure is built by hand, in one environment.
 - The principle from ADR-0003: default to the platform's recommended approach; deviate only for a reason specific to this app, written down. For production databases, Microsoft recommends private connectivity (a private endpoint) with public access off.
 
 ## Options considered
@@ -22,7 +22,7 @@
 ## Decision
 
 - We will use **the public endpoint with "Allow Azure services and resources" and Entra-only authentication (A)**, plus a firewall rule for my own IP while I need to connect from my machine.
-- This deviates from the recommendation for reasons specific to this app: nothing sensitive is stored, B's cost breaks the budget, and its networking would crowd out the topics this project is for. Entra-only authentication keeps the gate that matters strong.
+- This deviates from the recommendation for reasons specific to this app: nothing sensitive is stored, B's cost breaks the budget, and its networking would be a large piece of work beyond this project's scope. Entra-only authentication keeps the gate that matters strong.
 
 ## Consequences
 

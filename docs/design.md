@@ -6,7 +6,7 @@ _Written before the build, on 2026-10-19; updated on 2026-11-11 where the app tu
 
 - The user will be able to create todo lists. The user will be able to name, rename, and delete a list.
 - Each todo list will have a one to many relationship with todo items. Todo items can be added, deleted, edited, and marked as complete. Completed items move to a Completed section, most recent first.
-- Parts deliberately left out are additional features and authentication. This is a small app intended to teach shipping an app end to end.
+- Parts deliberately left out are additional features and authentication. The app is kept small so the work goes into shipping it end to end.
 
 ## Parts
 
