@@ -4,7 +4,7 @@ Each significant decision in this app, with the options considered and why one w
 
 | ADR | Decision | Status |
 | --- | --- | --- |
-| [0001](0001-ef-core-fundamentals.md) | Data access with EF Core, learned to the fundamentals | Accepted |
+| [0001](0001-data-access-with-ef-core.md) | Data access with EF Core, not ADO.NET or Dapper | Accepted |
 | [0002](0002-blazor-hosting-model.md) | Blazor WebAssembly served by the API | Superseded by 0003 |
 | [0003](0003-blazor-web-app-webassembly-interactivity.md) | Blazor Web App with global WebAssembly interactivity and prerendering | Accepted |
 | [0004](0004-applying-migrations-with-a-bundle.md) | Applying migrations with a migration bundle | Accepted |
@@ -14,4 +14,4 @@ Each significant decision in this app, with the options considered and why one w
 | [0008](0008-telemetry-with-azure-monitor-opentelemetry.md) | Telemetry with the Azure Monitor OpenTelemetry Distro | Accepted |
 | [0009](0009-health-endpoints-and-probes.md) | Health endpoints and probes that don't touch the database | Accepted |
 
-_2026-11-11: the ADRs were written as this app was built, as part of a personal learning plan. Before the repo went public they were reworded to stand on their own: references to that plan were removed, and so were the template's prompts. No decision, date or reason changed._
+_2026-11-12: the ADRs were written as this app was built. Before the repo went public they were edited to stand on their own: references to documents outside this repo and the template's prompts were removed, and ADR-0001 was reframed around the architecture decision it records. No decision or date changed._
