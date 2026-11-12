@@ -8,7 +8,7 @@ multi-ecosystem-groups:
   monthly:
     schedule:
       # The 20th, not `monthly` (the 1st): .NET patches ship on Patch Tuesday (the 8th-14th), so this picks them up
-      # about a week later, after Dependabot's 3-day cooldown.
+      # about a week later.
       interval: cron
       cronjob: "0 9 20 * *"
 
@@ -27,6 +27,10 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: dotnet-ef
         update-types: ["version-update:semver-major"]
+      # Kept at the OpenTelemetry version the Azure Monitor distro depends on (Directory.Packages.props): a newer
+      # exporter raises OpenTelemetry for the whole test process, so the tests would run a different version from
+      # production. Bump it by hand with the distro.
+      - dependency-name: OpenTelemetry.Exporter.InMemory
 
   # The FROM lines in the Dockerfile.
   - package-ecosystem: docker
