@@ -92,7 +92,7 @@ public sealed class ServerTodoService(TodoDbContext db) : ITodoService
 
     // Replaces the whole item, so one method covers every edit, including marking it done.
     // Trade-off: a caller sending a stale copy overwrites newer changes (a lost update). Acceptable for a
-    // single-user app; the fix is a concurrency token, planned for Stage 1.1.
+    // single-user app; the fix would be a concurrency token (rowversion), sent back by the client with each update.
     public async Task<bool> UpdateItemAsync(int id, UpdateTodoItemRequest request, CancellationToken ct = default)
     {
         var item = await db.TodoItems.FindAsync([id], ct);

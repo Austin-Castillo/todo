@@ -39,4 +39,4 @@ _What follows, good and bad: what gets easier, what you give up, what to watch f
 - Rolling back means running the bundle with an older target migration, which runs the `Down` methods and can lose data. Prefer fixing forward with a new migration.
 - The SQL isn't reviewed by default. Generate the script for any migration that drops or reshapes data.
 - CI should run `dotnet ef migrations has-pending-model-changes`, so a model change without its migration fails the build instead of the deploy.
-- Revisit if: a migration needs a review gate (add a script step), Stage 1 moves local orchestration to Aspire (`AddEFMigrations` and `PublishAsMigrationBundle` do the same job), or the pipeline can't reach Azure SQL to run the bundle.
+- Revisit if: a migration needs a review gate (add a script step), local orchestration moves to Aspire (`AddEFMigrations` and `PublishAsMigrationBundle` do the same job), or the pipeline can't reach Azure SQL to run the bundle.

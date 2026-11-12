@@ -266,7 +266,7 @@ _Done 2026-11-05 (ADR-0007). No cost._
 
 #### E2. The deploy
 
-_Since 2026-11-06 (PR #15): every push to `main` deploys. No manual steps._
+_Since 2026-11-06 (PR #15): every push to `main` deploys. No manual steps, apart from the check after it (step 6)._
 
 What one run does (`.github/workflows/ci.yaml`), in order:
 1. `Build and test` and `Image smoke test` run in parallel, as on a pull request.
@@ -274,6 +274,7 @@ What one run does (`.github/workflows/ci.yaml`), in order:
 3. `Deploy` starts once both jobs have passed, and signs in again (each job is a fresh runner).
 4. It sets `caj-todo-migrate`'s image to the new `todo-migrate`, starts it and polls the execution. The database may need a minute or two to resume. A failed execution stops the deploy: the server isn't touched, and the old revision keeps serving.
 5. It sets `ca-todo-api`'s image to the new `todo-api`, which creates a revision, and waits for it to be ready. A new revision shows `None` / `Activating` at first and `Healthy` about a minute later. Single revision mode keeps the old revision serving until then.
+6. **By hand, after the run:** open the site, open a list, and add, check and uncheck an item. `Healthy` only means the probes got an answer from `/alive`, which never touches the database (ADR-0009), and the IP restriction stops the runner from checking the site itself. _(Added 2026-11-11, after a review.)_
 
 Follow a run: the Actions tab, or `gh run watch`. Afterwards, from Azure's side:
 ```powershell
@@ -439,6 +440,8 @@ The steps are expand (add the new column and start writing it), backfill, switch
 | R4 contract | Drop `IsComplete` | `CompletedAt` | `CompletedAt` |
 
 Most releases change nothing a user can see; only R2 ships the feature.
+
+**Merge the next release only after the previous one has deployed.** The plan assumes the release before is what serves while a migration runs. The workflow's concurrency group (one per branch) holds one running run and one pending run, and a newer run replaces the pending one. Merge R3 and R4 while R2 is still deploying, and R3's run is dropped: R4's bundle applies R3's and R4's migrations together, dropping `IsComplete` while R2, which still maps it, serves, so every item query fails until R4 is up. Wait for each deploy to finish (the run, then the revision `Healthy`, then the check in E2) before merging the next release. _(Added 2026-11-11, after a review.)_
 
 **Can I roll back right now?** A rollback swaps only the server's image: the schema and data stay, and migrations never run again when rolling forward (`__EFMigrationsHistory`). So the older code must work with the current schema, and what it writes meanwhile must leave data the newer release can read.
 

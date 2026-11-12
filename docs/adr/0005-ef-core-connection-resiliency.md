@@ -35,4 +35,4 @@ _What follows, good and bad: what gets easier, what you give up, what to watch f
 - The first request after the database pauses waits for it to resume (up to about a minute, within the retry budget) instead of failing. A database that's really down takes about that long to show the Error page.
 - Retries buffer query results in memory. Irrelevant at this app's sizes.
 - EF assumes compatibility level 150. If a feature needs newer SQL, raise it with `UseCompatibilityLevel(170)`, which SQL Server 2025 also supports, and keep one configuration.
-- Revisit when: a staging environment on Azure SQL exists (Stage 1.2), so `UseAzureSql` can be tested before production; a feature needs Azure-only SQL; or duplicate creates become unacceptable (client-generated keys or a verification step).
+- Revisit when: a staging environment on Azure SQL exists, so `UseAzureSql` can be tested before production; a feature needs Azure-only SQL; or duplicate creates become unacceptable (client-generated keys or a verification step).

@@ -195,7 +195,7 @@ else
     }
 
     // An update replaces the whole item, so toggling sends the content from the last load too. If it changed elsewhere
-    // since, this overwrites it: the lost update that the Stage 1.1 concurrency token fixes.
+    // since, this overwrites it: a lost update, which a concurrency token would turn into a conflict.
     private Task Toggle(TodoItemDto item) =>
         SaveAsync(() => Todos.UpdateItemAsync(item.Id, new UpdateTodoItemRequest(item.Content, !item.IsComplete)));
 
