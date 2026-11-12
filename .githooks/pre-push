@@ -1,5 +1,5 @@
 #!/bin/sh
-# Refuses pushes to main: changes reach main through pull requests, and from Phase 0.2 a push to main deploys.
+# Refuses pushes to main: changes reach main through pull requests, and a push to main deploys.
 # GitHub only enforces branch protection on private repos with a paid plan, so this guards against accidents locally.
 # Enable once per clone: git config core.hooksPath .githooks
 # Bypass deliberately: git push --no-verify
