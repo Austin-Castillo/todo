@@ -11,7 +11,7 @@ _What's the situation? Which goals, constraints and forces make this a decision?
 - The app and the bundle sign in with managed identities (no passwords anywhere). Entra-only authentication turns SQL logins off on the server, so the only way in is an Entra token for an identity that has a user in the database.
 - Stage 0 has no sign-in and stores nothing sensitive: the ingress is restricted to my IP because anyone could write to the home page, not because of the data.
 - The whole subscription has a $10/month budget. The registry is the only fixed cost (about $5/month); the database and Container Apps run inside free allowances.
-- Phase 0.2 is already full of new topics (Container Apps, Azure SQL, managed identity, OIDC deploys, Application Insights). Stage 1.2 rebuilds the infrastructure in Terraform with separate dev and prod environments.
+- Phase 0.2 is already full of new topics (Container Apps, Azure SQL, managed identity, OIDC deploys, Application Insights). The infrastructure is built by hand, in one environment.
 - The principle from ADR-0003: default to the platform's recommended approach; deviate only for a reason specific to this app, written down. For production databases, Microsoft recommends private connectivity (a private endpoint) with public access off.
 
 ## Options considered
@@ -33,4 +33,4 @@ _What follows, good and bad: what gets easier, what you give up, what to watch f
 - Any Azure resource can reach the server's TCP endpoint; only identities with a database user can sign in. There are no SQL logins to guess or leak.
 - The migration bundle reaches the database the same way if it runs in the same Container Apps environment; where it runs is a separate ADR.
 - My IP rule breaks when my ISP changes my public IP; replace it then, and remove it when I no longer need direct access.
-- Revisit in Stage 1.2: Terraform makes B repeatable, and the ERP-lite app will hold data worth isolating. Also revisit if the app ever stores anything sensitive, or the budget grows.
+- Revisit if the infrastructure moves into code (which makes B repeatable), if the app ever stores anything sensitive, or if the budget grows.

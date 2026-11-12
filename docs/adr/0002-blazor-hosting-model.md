@@ -8,7 +8,7 @@
 _What's the situation? Which goals, constraints and forces make this a decision? State the problem, not the answer._
 - The primary goal of Stage 0 is shipping practice, within a timebox of about 4 weeks. Every deployable adds a Dockerfile, a Compose service, a CI image build, a registry push, a Container App, and its own health checks and telemetry.
 - The Stage 0 brief requires a Blazor client that talks only to the API, so EF Core lives only in the API and the Blazor Server DbContext-lifetime trap never comes up.
-- No auth in Stage 0 (that's Stage 1.2), so whatever is public can be used by anyone.
+- No auth in Stage 0, so whatever is public can be used by anyone.
 - My professional experience is all Blazor Server; I've never used Blazor WebAssembly.
 - The hosting model decides what gets deployed (one container or two), whether the API must be public, and whether CORS is needed.
 
@@ -30,9 +30,9 @@ _"We will..." State what was chosen and why it won over the other options._
 
 _What follows, good and bad: what gets easier, what you give up, what to watch for, and what would make you revisit this decision._
 - One Dockerfile, one Compose app service (plus SQL Server locally), one image, one Container App. No CORS, and the client doesn't need a per-environment API URL because it calls its own origin.
-- The API is public with no auth, so anyone can change data. Accepted for a practice app; auth comes in Stage 1.2.
+- The API is public with no auth, so anyone can change data. Accepted for a practice app.
 - No prerendering: the first visit downloads the .NET runtime (a few MB, cached afterwards) and shows a loading state. Fine for a private todo app.
 - Nothing secret can ever go in the client, because its config and code are downloaded to the browser.
 - I give up practice with a familiar front end and with multiple services talking over internal networking. The multi-service lesson is expected to come up naturally in the capstones.
-- Revisit if a later stage needs prerendering or SEO, a private API, or a server-side client that holds secrets.
+- Revisit if the app needs prerendering or SEO, a private API, or a server-side client that holds secrets.
 - The B′ version is listed as an "If ahead" option in the Stage 0 brief, so the two hosting models can be compared in practice.

@@ -35,4 +35,5 @@ _What follows, good and bad: what gets easier, what you give up, what to watch f
 - `/alive` answers anyone the ingress lets through (only my IP, today). It reveals only that the app is up.
 - Probe requests are filtered out of telemetry (ADR-0008), so a failing probe appears only in the platform's system logs and as restarts.
 - The probes are part of the Container App's configuration, not of the deploy: CI's `az containerapp update --image` should change only the image and keep them (to confirm on the first deploy after they're set). If this app's infrastructure moves into code, the probes belong there too.
+  - _2026-11-11:_ confirmed on 2026-11-09: the first deploy after the probes were set (revision 9) kept all three, and so did each update in the rollback rehearsal (`docs/checklist.md`, G).
 - This reasoning is specific to this app (one replica, one shared serverless database). An app with several replicas that can fail independently, through a dependency one replica can lose while others keep it, may want a database check in readiness, since there it can route around the failure.
