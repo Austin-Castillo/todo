@@ -16,3 +16,5 @@ Each significant decision in this app, with the options considered and why one w
 | [0010](0010-push-identity-and-production-environment.md) | A separate push identity, and deploys only through a production environment | Accepted |
 
 _2026-11-12: the ADRs were written as this app was built. Before the repo went public they were edited to stand on their own: references to documents outside this repo and the template's prompts were removed, and ADR-0001 was reframed around the architecture decision it records. No decision or date changed._
+
+_2026-11-13: the app's Azure resources were deleted (`docs/checklist.md`, H). The ADRs about Azure and deploying (0005 to 0010) describe how it ran._
