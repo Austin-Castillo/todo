@@ -7,7 +7,7 @@ The whole path from code to a running app on Azure, step by step: every portal a
 - Region: `centralus`. Everything in one region. `eastus2` was the first choice (closest to me), but on 2026-11-02 both it and `eastus` refused new SQL servers for this Pay-As-You-Go subscription (`RegionDoesNotAllowProvisioning`). Create the SQL server first in a new region: it's the resource most likely to be refused.
 - Network to Azure SQL: public endpoint, "Allow Azure services", Entra-only authentication (ADR-0006).
 - Identities: user-assigned, one per workload (`id-todo-api`, `id-todo-migrate`, `id-todo-deploy`), so they exist before the app and the job.
-- Deploys: GitHub Actions signs in as `id-todo-deploy` through an OIDC federated credential for `main` (no stored secret), pushes the smoke-tested images, runs the migration job with the new image, then updates the server (ADR-0007).
+- Deploys: GitHub Actions signs in through OIDC federated credentials (no stored secret): the image job as `id-todo-push`, trusted for `main`, to push the smoke-tested images; `Deploy` as `id-todo-deploy`, trusted only for the `production` environment, to run the migration job with the new image, then update the server (ADR-0007, ADR-0010).
 - Telemetry: the Azure Monitor OpenTelemetry Distro in the app, sending to a workspace-based Application Insights resource as `id-todo-api`, with local auth disabled; every trace kept, the health endpoints left out (ADR-0008). The probes call `/alive`, which never touches the database (ADR-0009).
 - Key Vault: not used. With managed identities there's no secret to store. It would be needed once the app has sign-in: its cookies need the Data Protection key ring kept outside the container and encrypted with a Key Vault key.
 - Creates run in the CLI (PowerShell); the portal is for looking.
@@ -29,7 +29,9 @@ Cloud Adoption Framework abbreviations; `ac1` makes globally unique names unique
 | Container Apps job (the migration bundle) | `caj-todo-migrate` |
 | Server identity | `id-todo-api` |
 | Migration identity | `id-todo-migrate` |
+| Push identity (GitHub Actions) | `id-todo-push` |
 | Deploy identity (GitHub Actions) | `id-todo-deploy` |
+| GitHub environment | `production` |
 
 ## Steps
 
@@ -221,7 +223,7 @@ Also seen: billed compute (the database's `app_cpu_billed` metric, 5-minute buck
 
 #### E1. The deploy identity
 
-_Done 2026-11-05 (ADR-0007). No cost._
+_Done 2026-11-05 (ADR-0007). No cost. Since 2026-11-12 the images are pushed by a separate identity, and this one is reached only through the `production` environment: E4._
 
 1. Variables:
    ```powershell
@@ -270,8 +272,8 @@ _Since 2026-11-06 (PR #15): every push to `main` deploys. No manual steps, apart
 
 What one run does (`.github/workflows/ci.yaml`), in order:
 1. `Build and test` and `Image smoke test` run in parallel, as on a pull request.
-2. The image job, on `main` only, signs in as `id-todo-deploy` (OIDC) and pushes `todo-api` and `todo-migrate` tagged with the commit SHA: the images the smoke test just ran.
-3. `Deploy` starts once both jobs have passed, and signs in again (each job is a fresh runner).
+2. The image job, on `main` only, signs in as `id-todo-push` (OIDC) and pushes `todo-api` and `todo-migrate` tagged with the commit SHA: the images the smoke test just ran.
+3. `Deploy` starts once both jobs have passed and production's rules allow it (only `main`), and signs in as `id-todo-deploy` with the environment's token (each job is a fresh runner).
 4. It sets `caj-todo-migrate`'s image to the new `todo-migrate`, starts it and polls the execution. The database may need a minute or two to resume. A failed execution stops the deploy: the server isn't touched, and the old revision keeps serving.
 5. It sets `ca-todo-api`'s image to the new `todo-api`, which creates a revision, and waits for it to be ready. A new revision shows `None` / `Activating` at first and `Healthy` about a minute later. Single revision mode keeps the old revision serving until then.
 6. **By hand, after the run:** open the site, open a list, and add, check and uncheck an item. `Healthy` only means the probes got an answer from `/alive`, which never touches the database (ADR-0009), and the IP restriction stops the runner from checking the site itself. _(Added 2026-11-11, after a review.)_
@@ -323,6 +325,43 @@ Two ways, normally both:
    az containerapp show -n $app -g $rg --query "{image:properties.template.containers[0].image, env:properties.template.containers[0].env[].name, probes:properties.template.containers[0].probes[].type}" -o json
    ```
 5. Open a revert pull request for the bad commit, or roll forward the same way with the newer SHA. Don't merge anything else while production differs from `main`.
+
+#### E4. A push identity and the production environment
+
+_Done 2026-11-12 (ADR-0010). No cost._
+
+Until now one identity, `id-todo-deploy`, did both CI jobs' work through one credential for `main`, so any job on `main` could sign in with full deploy rights. Now the image job pushes as `id-todo-push` (`AcrPush` only, trusted for `main`), and only a job in the `production` environment can sign in as `id-todo-deploy`. Every step adds something, or removes something only once its replacement has worked, so `main` keeps deploying throughout.
+
+1. Variables (local only). The prefix is the subject's start, with the immutable IDs (E1.3):
+   ```powershell
+   $rg = 'rg-todo-prod'; $loc = 'centralus'; $prefix = 'repo:Austin-Castillo@46911493/todo@1438831791'
+   ```
+2. The push identity, `AcrPush` on the registry only, and a credential for `main`. In a PowerShell string, write `$($prefix):ref`, not `$prefix:ref`, which reads as a variable `ref` in a scope `prefix`:
+   ```powershell
+   az identity create --resource-group $rg --name id-todo-push --location $loc --output none
+   $push = az identity show -g $rg -n id-todo-push --query "{clientId:clientId, principalId:principalId}" -o json | ConvertFrom-Json
+   $acrId = az acr show -n crtodoac1 --query id -o tsv
+   az role assignment create --assignee-object-id $push.principalId --assignee-principal-type ServicePrincipal --role AcrPush --scope $acrId --output none
+   az identity federated-credential create --resource-group $rg --identity-name id-todo-push --name github-main --issuer https://token.actions.githubusercontent.com --subject "$($prefix):ref:refs/heads/main" --audiences api://AzureADTokenExchange --output none
+   gh variable set AZURE_PUSH_CLIENT_ID --repo Austin-Castillo/todo --body $push.clientId
+   ```
+3. The deploy identity also trusts the environment's subject:
+   ```powershell
+   az identity federated-credential create --resource-group $rg --identity-name id-todo-deploy --name github-env-production --issuer https://token.actions.githubusercontent.com --subject "$($prefix):environment:production" --audiences api://AzureADTokenExchange --output none
+   ```
+4. The `production` environment on GitHub, which only `main` may deploy to (a custom deployment branch policy). No required reviewers: one person merges and deploys, so an approval would only add a click. Environments with protection rules need a public repo on GitHub Free.
+   ```powershell
+   '{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}' | gh api -X PUT repos/Austin-Castillo/todo/environments/production --input -
+   gh api -X POST repos/Austin-Castillo/todo/environments/production/deployment-branch-policies -f name=main -f type=branch
+   ```
+5. The workflow change: the image job signs in with `AZURE_PUSH_CLIENT_ID`, and `Deploy` declares `environment: production`. Its merge deployed through the environment.
+6. Only after that deploy: take `AcrPush` and the `main` credential away from `id-todo-deploy`, so it can only be reached through the environment:
+   ```powershell
+   $dep = az identity show -g $rg -n id-todo-deploy --query principalId -o tsv
+   az role assignment delete --assignee $dep --role AcrPush --scope $acrId
+   az identity federated-credential delete --resource-group $rg --identity-name id-todo-deploy --name github-main --yes
+   ```
+7. Check: each identity has one credential (`id-todo-push`: `:ref:refs/heads/main`; `id-todo-deploy`: `:environment:production`), `id-todo-deploy` has only its two Container Apps roles, and the next merge deploys.
 
 ### F. Observability
 
