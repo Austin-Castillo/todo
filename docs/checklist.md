@@ -1,6 +1,6 @@
 # Shipping checklist
 
-The whole path from code to a running app on Azure, step by step: every portal and CLI action and the settings chosen.
+The whole path from code to a running app on Azure, step by step: every portal and CLI action and the settings chosen. The app ran on Azure from 2026-11-04 to 2026-11-13; H is how it was taken down.
 
 ## Decisions
 
@@ -268,7 +268,7 @@ _Done 2026-11-05 (ADR-0007). No cost. Since 2026-11-12 the images are pushed by 
 
 #### E2. The deploy
 
-_Since 2026-11-06 (PR #15): every push to `main` deploys. No manual steps, apart from the check after it (step 6)._
+_From 2026-11-06 (PR #15) to 2026-11-13 (H): every push to `main` deployed. No manual steps, apart from the check after it (step 6)._
 
 What one run does (`.github/workflows/ci.yaml`), in order:
 1. `Build and test` and `Image smoke test` run in parallel, as on a pull request.
@@ -501,3 +501,23 @@ What happened at each release:
 - **R4** (PR #23, 2026-11-11): `migrations add` gave an empty migration; the drop is EF's `DropColumn`, written in by hand. Read the SQL before shipping a drop (ADR-0004): `dotnet ef migrations script StopMappingIsComplete DropIsComplete --project src/Todo.Api`. On SQL Server, `DropColumn` first looks up and drops the column's default constraint; a plain `ALTER TABLE … DROP COLUMN` fails while the constraint exists ("The object 'DF_TodoItems_IsComplete' is dependent on column 'IsComplete'"; every test failed in the fixture's migration). `Down` rebuilds the column with the same named default and fills it from `CompletedAt`, so R3's `Down` still finds its constraint. Production after the deploy: the column and its default are gone, and checking, unchecking and adding items work.
 
 Four releases over three days, each deployed by CI with no manual database step, and no rows ever left disagreeing in production.
+
+### H. Teardown
+
+_Done 2026-11-13. Leaves no cost behind; the `safety-net` budget is on the billing account and stays._
+
+In this order, so nothing is left trying to reach what's gone:
+
+1. Save a snapshot of the live configuration somewhere private, not in the repo: `az group export -n rg-todo-prod --skip-resource-name-params`, plus `az containerapp show`, `az containerapp job show`, each identity's federated credentials and role assignments (`az role assignment list --assignee <principalId> --all`), and the GitHub variables and environment. `az group export` can't export some SQL, Log Analytics and Application Insights sub-resources; they were all defaults. The database users live inside the database and aren't in any of it (C3 has them).
+2. Merge the last pull request (here, the docs saying the app is gone) while the resources still exist: every merge to `main` deploys. The workflow keeps its push and deploy jobs, so recreating the resources and the variables is enough to deploy again.
+3. Delete the repository variables, which name identities that are about to disappear:
+   ```powershell
+   foreach ($v in 'AZURE_CLIENT_ID', 'AZURE_PUSH_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID') { gh variable delete $v --repo Austin-Castillo/todo }
+   ```
+4. Delete the resource group and everything in it (about 5 to 10 minutes; `--no-wait` returns at once). The SQL server's name, `crtodoac1` and the other global names become free for anyone to take.
+   ```powershell
+   az group delete --name rg-todo-prod --yes --no-wait
+   az group exists --name rg-todo-prod
+   ```
+   Repeat the second command until it prints `false`. Deleting the group also deletes the role assignments scoped to its resources; the identities' federated credentials go with the identities.
+5. Archive the repo straight away (read-only: nothing can be pushed or merged, so no workflow runs, and Dependabot stops): `gh repo archive Austin-Castillo/todo`. To bring it back: unarchive (`gh repo unarchive`), recreate the resources (A to F, E4) and the variables, then merge.

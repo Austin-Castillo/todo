@@ -2,15 +2,17 @@
 
 A deliberately small .NET todo app with a production-grade delivery path: tested against a real SQL Server and built by GitHub Actions on every pull request, containerized with Docker, deployed to Azure Container Apps with no stored secrets, observable through Application Insights, and changed safely while live. The engineering is in how it ships.
 
-> **Status:** built in October and November 2026. It ran on Azure Container Apps, but only my own IP address could reach it: it has no sign-in, and anyone could write to its home page. The Azure resources are being deleted; [`docs/checklist.md`](docs/checklist.md) has every step to recreate them.
+> **Status:** the app ran on Azure Container Apps, reachable only from my own IP address: it has no sign-in, and anyone could write to its home page. Its Azure resources have since been deleted. [`docs/checklist.md`](docs/checklist.md) has every step to recreate them. The workflow still has its push and deploy jobs, which would work again once the resources and the repo's variables are recreated.
 
 ## What's here
 
 - **The app:** todo lists and their items. A Blazor Web App with global WebAssembly interactivity: an ASP.NET Core server prerenders each page and serves the client, and the client then calls the server's minimal APIs. EF Core over SQL Server locally and Azure SQL in production.
 - **Tests:** xUnit v3 integration tests through `WebApplicationFactory`, against a real SQL Server that Testcontainers starts for the run.
 - **Containers:** a multi-stage Dockerfile building two images from one build, the server and an EF Core migration bundle; Docker Compose runs SQL Server, then the migrations, then the server.
-- **CI/CD:** every pull request builds, tests and smoke-tests the images. A merge to `main` pushes the images it tested, tagged with the commit SHA, runs the migrations, and only then deploys the server.
-- **Azure:** Container Registry, Container Apps (the server and a migration job), Azure SQL serverless with Entra-only authentication, a managed identity per workload, GitHub Actions signing in through OIDC federation (no stored secrets), and Application Insights through OpenTelemetry.
+- **CI/CD:** every pull request builds, tests and smoke-tests the images, and `main` accepts changes only through pull requests whose checks pass. While the app ran on Azure, a merge to `main` pushed the images it tested, tagged with the commit SHA, ran the migrations, and only then deployed the server, through a GitHub `production` environment.
+- **Azure, while it ran:** Container Registry, Container Apps (the server and a migration job), Azure SQL serverless with Entra-only authentication, a managed identity per workload, GitHub Actions signing in through OIDC federation (no stored secrets), and Application Insights through OpenTelemetry.
+
+How a merge reached production while the app ran on Azure:
 
 ```mermaid
 flowchart LR
