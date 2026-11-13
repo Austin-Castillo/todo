@@ -1,6 +1,6 @@
 # ADR-0007: Running the Migration Bundle as a Container Apps Job in Continuous Deployment
 
-- **Status:** Accepted
+- **Status:** Accepted; its sign-in (one identity, one credential for `main`) replaced by [ADR-0010](0010-push-identity-and-production-environment.md)
 - **Date:** 2026-11-05
 
 ## Context

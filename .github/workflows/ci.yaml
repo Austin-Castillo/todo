@@ -18,8 +18,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Where main deploys to. The IDs that sign in to Azure are repository variables (not secrets: GitHub's signed token
-# for this repo's main is what gets in; see docs/checklist.md, E1).
+# Where main deploys to. Two identities sign in to Azure (ADR-0010): the image job pushes as id-todo-push, which Entra
+# trusts for this repo's main and which can only push images; Deploy deploys as id-todo-deploy, which Entra trusts only
+# for the production environment. Their IDs are repository variables, not secrets: a token GitHub signed for this repo
+# is what gets in (docs/checklist.md, E1 and E4).
 env:
   REGISTRY: crtodoac1.azurecr.io
   RESOURCE_GROUP: rg-todo-prod
@@ -94,11 +96,12 @@ jobs:
           check /no-such-page 404
 
       # Build once: on main, push the images that just passed, tagged with the commit (never rebuilt for the deploy).
+      # As id-todo-push: AcrPush on the registry, nothing else.
       - name: Sign in to Azure
         if: github.event_name == 'push'
         uses: azure/login@v3
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          client-id: ${{ vars.AZURE_PUSH_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
@@ -120,6 +123,9 @@ jobs:
     # Main only, and only once both CI jobs have passed: the tests, and the smoke test of the images it deploys.
     if: github.event_name == 'push'
     needs: [build-test, image]
+    # GitHub runs this job only if production's rules allow it (only main may deploy), records it as a deployment,
+    # and gives it the token subject repo:...:environment:production, the only one id-todo-deploy trusts.
+    environment: production
     runs-on: ubuntu-latest
     # The migration job's own limit is 10 minutes; the server update takes a minute or two.
     timeout-minutes: 20

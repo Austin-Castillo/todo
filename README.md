@@ -1,6 +1,6 @@
 # Todo
 
-A deliberately small todo app with a production-grade delivery path: tested against a real SQL Server and built by GitHub Actions on every pull request, containerized with Docker, deployed to Azure Container Apps with no stored secrets, observable through Application Insights, and changed safely while live. The engineering is in how it ships.
+A deliberately small .NET todo app with a production-grade delivery path: tested against a real SQL Server and built by GitHub Actions on every pull request, containerized with Docker, deployed to Azure Container Apps with no stored secrets, observable through Application Insights, and changed safely while live. The engineering is in how it ships.
 
 > **Status:** built in October and November 2026. It ran on Azure Container Apps, but only my own IP address could reach it: it has no sign-in, and anyone could write to its home page. The Azure resources are being deleted; [`docs/checklist.md`](docs/checklist.md) has every step to recreate them.
 
