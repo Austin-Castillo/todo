@@ -23,11 +23,11 @@ flowchart LR
     accDescr: Users reached the Container App through an ingress restricted to one IP. The app and the migration job pulled images from the registry and signed in to Azure SQL with their own managed identities. GitHub Actions pushed images as id-todo-push and deployed as id-todo-deploy. The app sent telemetry to Application Insights.
     user([One allowed IP]) -->|HTTPS| ingress[Ingress<br/>TLS ends here]
     subgraph rg["rg-todo-prod"]
-        ingress --> app["ca-todo-api<br/>runs as id-todo-api"]
-        job["caj-todo-migrate<br/>runs as id-todo-migrate"]
-        acr[(Container Registry)]
-        sql[("Azure SQL serverless<br/>Entra-only sign-in")]
-        appi["Application Insights<br/>+ Log Analytics"]
+        ingress --> app["ca-todo-api<br/>Container App, runs as id-todo-api"]
+        job["caj-todo-migrate<br/>Container Apps job, runs as id-todo-migrate"]
+        acr[("crtodoac1<br/>Container Registry")]
+        sql[("sqldb-todo<br/>Azure SQL serverless, Entra-only")]
+        appi["appi-todo-prod<br/>Application Insights, on log-todo-prod"]
     end
     gha["GitHub Actions"] -->|push as id-todo-push<br/>AcrPush| acr
     gha -->|deploy as id-todo-deploy<br/>Container Apps roles| job
